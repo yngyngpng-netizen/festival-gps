@@ -1,5 +1,9 @@
-const STORAGE_KEY = "festival-gps-pwa-v1";
+import { firebaseConfig, firebaseIsConfigured } from "./firebase-config.js";
+
+const STORAGE_KEY = "festival-gps-pwa-v2";
+const LAST_GROUP_KEY = "festival-gps-last-group";
 const MAP_URL = "https://d3vhc53cl8e8km.cloudfront.net/hello-staging/wp-content/uploads/sites/21/2026/05/08131244/edclv_2026_de_festival_map_1080x1350_r05_blurred.jpg";
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 const days = {
   friday: { label: "Friday", short: "Fri", date: "May 15", start: 17 * 60, end: 29 * 60 + 30 },
@@ -44,68 +48,63 @@ const aliases = new Map([
   ["downtown", "downtown-edc"]
 ]);
 
-const sampleFriends = [
-  {
-    id: "you",
-    name: "You",
-    handle: "@you",
-    color: "#53e2ff",
-    photo: "",
-    schedule: [
-      event("Opening Ceremony", "cosmic-meadow", "friday", 17 * 60, 19 * 60),
-      event("Demo Mainstage Set", "kinetic-field", "friday", 21 * 60, 22 * 60 + 15),
-      event("Late Night Techno", "neon-garden", "friday", 24 * 60 + 45, 26 * 60)
-    ]
-  },
-  {
-    id: "maya",
-    name: "Maya Chen",
-    handle: "@maya",
-    color: "#ff4fd8",
-    photo: "",
-    schedule: [
-      event("House Warmup", "stereo-bloom", "friday", 20 * 60, 21 * 60),
-      event("Circuit Run", "circuit-grounds", "friday", 22 * 60 + 20, 23 * 60 + 30),
-      event("Trance Hour", "quantum-valley", "friday", 24 * 60 + 30, 25 * 60 + 30)
-    ]
-  },
-  {
-    id: "leo",
-    name: "Leo Park",
-    handle: "@leo",
-    color: "#a5ff5f",
-    photo: "",
-    schedule: [
-      event("Bass Meetup", "basspod", "friday", 20 * 60 + 30, 21 * 60 + 30),
-      event("Hard Dance Block", "wasteland", "friday", 23 * 60, 24 * 60 + 15),
-      event("Afterglow", "art-cars", "friday", 26 * 60, 27 * 60)
-    ]
-  }
-];
+let state = {
+  selectedDay: "friday",
+  selectedMinute: days.friday.start,
+  user: null,
+  groupCode: "",
+  friends: []
+};
 
-let state = loadState();
-let selectedFriendId = state.friends[0]?.id || "you";
+let localStore = loadLocalStore();
+let services = {
+  cloud: false,
+  auth: null,
+  db: null,
+  unsubscribeGroup: null
+};
+let fb = {};
+let selectedFriendId = "";
 let parsedEvents = [];
+let authMode = "create";
+let pendingAuthPhoto = "";
+let pendingProfilePhoto = "";
 
 const els = {};
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", init);
+
+async function init() {
   bindElements();
   registerServiceWorker();
   setMapImage();
   renderDayButtons();
   renderStages();
-  renderAll();
   bindEvents();
-});
-
-function event(artist, stageId, day, start, end) {
-  return { id: cryptoId(), artist, stageId, day, start, end };
+  await initCloud();
+  hydrateLocalSession();
+  renderAuthGate();
 }
 
 function bindElements() {
   [
+    "onboarding",
+    "appShell",
+    "authForm",
+    "authName",
+    "authEmail",
+    "authPassword",
+    "authGroupCode",
+    "authPhoto",
+    "authPhotoPreview",
+    "authSubmitButton",
+    "authModeButton",
+    "authMessage",
+    "cloudBadge",
     "currentContext",
+    "syncStatus",
+    "groupButton",
+    "groupCodeLabel",
     "friendsButton",
     "profileButton",
     "scheduleButton",
@@ -115,19 +114,23 @@ function bindElements() {
     "startTimeLabel",
     "endTimeLabel",
     "friendStrip",
+    "selectedFriendName",
+    "selectedFriendStage",
     "stageLayer",
+    "routeLayer",
     "pinLayer",
     "friendsDialog",
+    "friendGroupCode",
+    "copyGroupFromFriendsButton",
     "friendList",
-    "friendCode",
-    "importFriendButton",
-    "friendImportMessage",
     "profileDialog",
     "profileName",
     "profilePhoto",
     "profilePreview",
+    "profileGroupCode",
+    "copyGroupButton",
     "saveProfileButton",
-    "copyPinButton",
+    "signOutButton",
     "profileMessage",
     "scheduleDialog",
     "scheduleDay",
@@ -143,15 +146,30 @@ function bindElements() {
 }
 
 function bindEvents() {
+  els.authForm.addEventListener("submit", handleAuthSubmit);
+  els.authModeButton.addEventListener("click", () => setAuthMode(authMode === "create" ? "signin" : "create"));
+  els.authName.addEventListener("input", () => renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value));
+  els.authPhoto.addEventListener("change", async () => {
+    const file = els.authPhoto.files?.[0];
+    pendingAuthPhoto = file ? await imageFileToDataUrl(file) : "";
+    renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value);
+  });
+
   els.friendsButton.addEventListener("click", () => {
+    renderFriendList();
+    openDialog(els.friendsDialog);
+  });
+  els.groupButton.addEventListener("click", () => {
     renderFriendList();
     openDialog(els.friendsDialog);
   });
 
   els.profileButton.addEventListener("click", () => {
     const user = currentUser();
-    els.profileName.value = user.name;
+    els.profileName.value = user.name || "";
+    els.profileGroupCode.textContent = state.groupCode || "NO GROUP";
     els.profileMessage.textContent = "";
+    pendingProfilePhoto = "";
     renderProfilePreview(user);
     openDialog(els.profileDialog);
   });
@@ -168,45 +186,24 @@ function bindEvents() {
 
   els.timeRange.addEventListener("input", () => {
     state.selectedMinute = Number(els.timeRange.value);
-    saveState();
+    saveLocalStore();
     renderAll();
   });
 
   els.profileName.addEventListener("input", () => {
-    renderProfilePreview({ ...currentUser(), name: els.profileName.value });
+    renderProfilePreview({ ...currentUser(), name: els.profileName.value, photo: pendingProfilePhoto || currentUser().photo });
   });
 
   els.profilePhoto.addEventListener("change", async () => {
     const file = els.profilePhoto.files?.[0];
-    if (!file) return;
-    const photo = await fileToDataUrl(file);
-    renderProfilePreview({ ...currentUser(), photo });
+    pendingProfilePhoto = file ? await imageFileToDataUrl(file) : "";
+    renderProfilePreview({ ...currentUser(), name: els.profileName.value, photo: pendingProfilePhoto || currentUser().photo });
   });
 
-  els.saveProfileButton.addEventListener("click", async () => {
-    const user = currentUser();
-    user.name = cleanName(els.profileName.value);
-    const file = els.profilePhoto.files?.[0];
-    if (file) {
-      user.photo = await fileToDataUrl(file);
-    }
-    saveState();
-    renderAll();
-    els.profileMessage.textContent = "Saved.";
-  });
-
-  els.copyPinButton.addEventListener("click", async () => {
-    const code = encodeFriend(currentUser());
-    const copied = await copyText(code);
-    els.profileMessage.textContent = copied ? "Pin code copied." : code;
-  });
-
-  els.importFriendButton.addEventListener("click", () => {
-    const message = importFriendCode(els.friendCode.value);
-    els.friendImportMessage.textContent = message;
-    renderAll();
-    renderFriendList();
-  });
+  els.saveProfileButton.addEventListener("click", saveProfile);
+  els.signOutButton.addEventListener("click", signOutUser);
+  els.copyGroupButton.addEventListener("click", copyGroupCode);
+  els.copyGroupFromFriendsButton.addEventListener("click", copyGroupCode);
 
   els.scheduleDay.addEventListener("change", () => {
     parsedEvents = parseSchedule(els.ocrText.value, els.scheduleDay.value);
@@ -215,8 +212,7 @@ function bindEvents() {
 
   els.scheduleImage.addEventListener("change", async () => {
     const file = els.scheduleImage.files?.[0];
-    if (!file) return;
-    await recognizeSchedule(file);
+    if (file) await recognizeSchedule(file);
   });
 
   els.ocrText.addEventListener("input", () => {
@@ -230,56 +226,330 @@ function bindEvents() {
       "8:00 PM - 9:00 PM House Warmup Stereo Bloom",
       "9:30 PM - 10:45 PM Mainstage Set Kinetic Field",
       "11:30 PM - 12:30 AM Bass Meetup Basspod",
-      "1:00 AM - 2:00 AM Neon Finale Neon Garden"
+      "Saturday May 16",
+      "8:15 PM - 9:15 PM Desert House Cosmic Meadow",
+      "10:00 PM - 11:20 PM Circuit Run Circuit Grounds",
+      "Sunday May 17",
+      "12:30 AM - 1:30 AM Neon Finale Neon Garden"
     ].join("\n");
     parsedEvents = parseSchedule(els.ocrText.value, els.scheduleDay.value);
     els.ocrStatus.textContent = `${parsedEvents.length} sets generated.`;
     renderParsedSchedule();
   });
 
-  els.applyScheduleButton.addEventListener("click", () => {
-    if (!parsedEvents.length) {
-      els.ocrStatus.textContent = "No sets to apply.";
-      return;
-    }
-    currentUser().schedule = parsedEvents;
-    saveState();
-    renderAll();
-    els.scheduleDialog.close();
-  });
+  els.applyScheduleButton.addEventListener("click", applySchedule);
 }
 
-function loadState() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (stored?.friends?.length) {
-      return {
-        selectedDay: stored.selectedDay || "friday",
-        selectedMinute: stored.selectedMinute || days.friday.start,
-        friends: stored.friends
-      };
-    }
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
+async function initCloud() {
+  if (!firebaseIsConfigured()) {
+    els.cloudBadge.textContent = "Local demo store";
+    return;
   }
 
-  return {
-    selectedDay: "friday",
-    selectedMinute: days.friday.start,
-    friends: structuredClone(sampleFriends)
+  try {
+    const [appModule, authModule, firestoreModule] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"),
+      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js")
+    ]);
+    fb = { ...appModule, ...authModule, ...firestoreModule };
+
+    const app = fb.initializeApp(firebaseConfig);
+    services.auth = fb.getAuth(app);
+    services.db = fb.getFirestore(app);
+    services.cloud = true;
+    els.cloudBadge.textContent = "Firebase secure sync";
+
+    fb.onAuthStateChanged(services.auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        if (!localStore.session) {
+          resetState();
+          renderAuthGate();
+        }
+        return;
+      }
+
+      const lastGroup = localStorage.getItem(LAST_GROUP_KEY);
+      state.user = {
+        id: firebaseUser.uid,
+        email: firebaseUser.email || "",
+        name: firebaseUser.displayName || "You",
+        photo: "",
+        color: randomColor(),
+        schedule: []
+      };
+
+      if (lastGroup) {
+        await enterCloudGroup(lastGroup, state.user, { preserveExisting: true });
+      } else {
+        renderAuthGate();
+      }
+    });
+  } catch (error) {
+    services.cloud = false;
+    els.cloudBadge.textContent = "Local demo store";
+    els.authMessage.textContent = `Firebase did not start: ${error.message || error}`;
+  }
+}
+
+function hydrateLocalSession() {
+  if (services.cloud) return;
+  if (!localStore.session?.uid || !localStore.session?.groupCode) return;
+
+  const group = localStore.groups[localStore.session.groupCode];
+  const user = group?.members?.[localStore.session.uid];
+  if (!group || !user) return;
+
+  state.selectedDay = localStore.selectedDay || state.selectedDay;
+  state.selectedMinute = localStore.selectedMinute || state.selectedMinute;
+  state.user = user;
+  state.groupCode = localStore.session.groupCode;
+  state.friends = friendsFromGroup(group);
+  selectedFriendId = user.id;
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  setBusy(true);
+  els.authMessage.textContent = "";
+
+  const profile = {
+    id: "",
+    name: cleanName(els.authName.value),
+    email: els.authEmail.value.trim().toLowerCase(),
+    photo: pendingAuthPhoto,
+    color: randomColor(),
+    schedule: []
   };
+  const groupCode = normalizeGroupCode(els.authGroupCode.value);
+  const password = els.authPassword.value;
+
+  try {
+    if (!groupCode) throw new Error("Enter a group code.");
+
+    if (services.cloud) {
+      await authenticateWithFirebase(profile, password, groupCode);
+    } else {
+      enterLocalGroup(profile, groupCode);
+    }
+
+    els.authForm.reset();
+    pendingAuthPhoto = "";
+    renderAuthPhotoPreview("", "");
+    renderAuthGate();
+  } catch (error) {
+    els.authMessage.textContent = humanAuthError(error);
+  } finally {
+    setBusy(false);
+  }
 }
 
-function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+async function authenticateWithFirebase(profile, password, groupCode) {
+  let credential;
+
+  if (authMode === "create") {
+    try {
+      credential = await fb.createUserWithEmailAndPassword(services.auth, profile.email, password);
+    } catch (error) {
+      if (error.code !== "auth/email-already-in-use") throw error;
+      credential = await fb.signInWithEmailAndPassword(services.auth, profile.email, password);
+    }
+  } else {
+    credential = await fb.signInWithEmailAndPassword(services.auth, profile.email, password);
+  }
+
+  profile.id = credential.user.uid;
+  await fb.updateProfile(credential.user, { displayName: profile.name });
+  await enterCloudGroup(groupCode, profile, { preserveExisting: authMode === "signin" });
 }
 
-function currentUser() {
-  return state.friends[0];
+async function enterCloudGroup(groupCode, profile, options = {}) {
+  const memberRef = fb.doc(services.db, "groups", groupCode, "members", profile.id);
+  const memberSnap = await fb.getDoc(memberRef);
+  const existing = memberSnap.exists() ? memberSnap.data() : {};
+  const member = sanitizeMember({
+    ...existing,
+    ...profile,
+    groupCode,
+    name: profile.name || existing.name || "You",
+    email: profile.email || existing.email || "",
+    photo: profile.photo || existing.photo || "",
+    color: existing.color || profile.color || randomColor(),
+    schedule: options.preserveExisting ? existing.schedule || profile.schedule || [] : profile.schedule || existing.schedule || [],
+    updatedAt: fb.serverTimestamp()
+  });
+
+  await fb.setDoc(fb.doc(services.db, "groups", groupCode), {
+    code: groupCode,
+    updatedAt: fb.serverTimestamp()
+  }, { merge: true });
+  await fb.setDoc(memberRef, member, { merge: true });
+
+  state.user = { ...member, id: profile.id };
+  state.groupCode = groupCode;
+  selectedFriendId = state.user.id;
+  localStorage.setItem(LAST_GROUP_KEY, groupCode);
+  subscribeToGroup(groupCode);
 }
 
-function setMapImage() {
-  document.querySelector(".map-photo").style.backgroundImage = `linear-gradient(rgba(5, 6, 17, 0.18), rgba(5, 6, 17, 0.34)), url("${MAP_URL}")`;
+function subscribeToGroup(groupCode) {
+  if (services.unsubscribeGroup) services.unsubscribeGroup();
+
+  services.unsubscribeGroup = fb.onSnapshot(
+    fb.collection(services.db, "groups", groupCode, "members"),
+    (snapshot) => {
+      state.friends = snapshot.docs
+        .map((document) => normalizeMember({ id: document.id, ...document.data() }))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+      const current = state.friends.find((friend) => friend.id === state.user?.id);
+      if (current) state.user = current;
+      if (!selectedFriendId && state.user) selectedFriendId = state.user.id;
+      renderAuthGate();
+    },
+    (error) => {
+      els.syncStatus.textContent = "sync error";
+      els.authMessage.textContent = error.message || String(error);
+    }
+  );
+}
+
+function enterLocalGroup(profile, groupCode) {
+  const uid = localStore.session?.uid || cryptoId();
+  const group = localStore.groups[groupCode] || { code: groupCode, members: {} };
+  const existing = group.members[uid] || {};
+  const member = normalizeMember({
+    ...existing,
+    ...profile,
+    id: uid,
+    groupCode,
+    photo: profile.photo || existing.photo || "",
+    color: existing.color || profile.color || randomColor(),
+    schedule: existing.schedule || profile.schedule || []
+  });
+
+  group.members[uid] = member;
+  localStore.groups[groupCode] = group;
+  localStore.session = { uid, groupCode };
+  state.user = member;
+  state.groupCode = groupCode;
+  state.friends = friendsFromGroup(group);
+  selectedFriendId = uid;
+  saveLocalStore();
+}
+
+async function persistCurrentMember() {
+  const user = currentUser();
+  if (!user?.id || !state.groupCode) return;
+
+  if (services.cloud) {
+    await fb.setDoc(fb.doc(services.db, "groups", state.groupCode, "members", user.id), sanitizeMember({
+      ...user,
+      groupCode: state.groupCode,
+      updatedAt: fb.serverTimestamp()
+    }), { merge: true });
+  } else {
+    const group = localStore.groups[state.groupCode] || { code: state.groupCode, members: {} };
+    group.members[user.id] = normalizeMember(user);
+    localStore.groups[state.groupCode] = group;
+    localStore.session = { uid: user.id, groupCode: state.groupCode };
+    state.friends = friendsFromGroup(group);
+    saveLocalStore();
+  }
+}
+
+async function saveProfile() {
+  const user = currentUser();
+  user.name = cleanName(els.profileName.value);
+  if (pendingProfilePhoto) user.photo = pendingProfilePhoto;
+  state.user = user;
+
+  try {
+    await persistCurrentMember();
+    pendingProfilePhoto = "";
+    renderAll();
+    els.profileMessage.textContent = "Saved to your group.";
+  } catch (error) {
+    els.profileMessage.textContent = error.message || String(error);
+  }
+}
+
+async function signOutUser() {
+  if (services.unsubscribeGroup) services.unsubscribeGroup();
+  services.unsubscribeGroup = null;
+
+  if (services.cloud && services.auth.currentUser) {
+    await fb.signOut(services.auth);
+  }
+
+  localStore.session = null;
+  saveLocalStore();
+  localStorage.removeItem(LAST_GROUP_KEY);
+  resetState();
+  renderAuthGate();
+  els.profileDialog.close();
+}
+
+async function copyGroupCode() {
+  const copied = await copyText(state.groupCode);
+  const message = copied ? "Group code copied." : state.groupCode;
+  if (els.profileDialog.open) els.profileMessage.textContent = message;
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const create = mode === "create";
+  els.authSubmitButton.textContent = create ? "Create account" : "Sign in";
+  els.authModeButton.textContent = create ? "I already have an account" : "Create a new account";
+  els.authPassword.autocomplete = create ? "new-password" : "current-password";
+}
+
+function setBusy(isBusy) {
+  els.authSubmitButton.disabled = isBusy;
+  els.authSubmitButton.textContent = isBusy ? "Opening the gate..." : (authMode === "create" ? "Create account" : "Sign in");
+}
+
+function renderAuthGate() {
+  const signedIn = Boolean(state.user?.id && state.groupCode);
+  els.onboarding.hidden = signedIn;
+  els.appShell.hidden = !signedIn;
+
+  if (!signedIn) {
+    els.cloudBadge.textContent = services.cloud ? "Firebase secure sync" : "Local demo store";
+    return;
+  }
+
+  selectedFriendId = state.friends.some((friend) => friend.id === selectedFriendId)
+    ? selectedFriendId
+    : state.user.id;
+  renderAll();
+}
+
+function renderAll() {
+  if (!state.user) return;
+
+  const day = days[state.selectedDay];
+  state.selectedMinute = clamp(state.selectedMinute, day.start, day.end);
+  els.timeRange.min = day.start;
+  els.timeRange.max = day.end;
+  els.timeRange.value = state.selectedMinute;
+  els.timeOutput.value = formatTime(state.selectedMinute);
+  els.startTimeLabel.textContent = formatTime(day.start);
+  els.endTimeLabel.textContent = formatTime(day.end);
+  els.currentContext.textContent = `${day.label} ${day.date} - ${formatTime(state.selectedMinute)}`;
+  els.syncStatus.textContent = services.cloud ? "live sync" : "local demo";
+  els.groupCodeLabel.textContent = state.groupCode;
+  els.friendGroupCode.textContent = state.groupCode;
+  els.profileGroupCode.textContent = state.groupCode;
+
+  [...els.dayButtons.children].forEach((button, index) => {
+    button.classList.toggle("active", Object.keys(days)[index] === state.selectedDay);
+  });
+
+  renderRoutes();
+  renderPins();
+  renderFriendStrip();
+  renderSelectedFriendSummary();
 }
 
 function renderDayButtons() {
@@ -291,8 +561,7 @@ function renderDayButtons() {
     button.addEventListener("click", () => {
       state.selectedDay = id;
       state.selectedMinute = clamp(state.selectedMinute, day.start, day.end);
-      saveState();
-      renderDayButtons();
+      saveLocalStore();
       renderAll();
     });
     els.dayButtons.append(button);
@@ -319,23 +588,25 @@ function renderStages() {
   });
 }
 
-function renderAll() {
-  const day = days[state.selectedDay];
-  state.selectedMinute = clamp(state.selectedMinute, day.start, day.end);
-  els.timeRange.min = day.start;
-  els.timeRange.max = day.end;
-  els.timeRange.value = state.selectedMinute;
-  els.timeOutput.value = formatTime(state.selectedMinute);
-  els.startTimeLabel.textContent = formatTime(day.start);
-  els.endTimeLabel.textContent = formatTime(day.end);
-  els.currentContext.textContent = `${day.label} ${day.date} • ${formatTime(state.selectedMinute)}`;
+function renderRoutes() {
+  els.routeLayer.replaceChildren();
 
-  [...els.dayButtons.children].forEach((button, index) => {
-    button.classList.toggle("active", Object.keys(days)[index] === state.selectedDay);
+  state.friends.forEach((friend) => {
+    const points = friend.schedule
+      .filter((item) => item.day === state.selectedDay)
+      .sort((a, b) => a.start - b.start)
+      .map((item) => stageById(item.stageId))
+      .filter(Boolean)
+      .map((stage) => `${Math.round(stage.x * 1000)},${Math.round(stage.y * 1000)}`);
+
+    if (points.length < 2) return;
+
+    const line = document.createElementNS(SVG_NS, "polyline");
+    line.setAttribute("points", points.join(" "));
+    line.setAttribute("class", friend.id === selectedFriendId ? "route-line selected" : "route-line");
+    line.setAttribute("stroke", friend.color || "#53e2ff");
+    els.routeLayer.append(line);
   });
-
-  renderPins();
-  renderFriendStrip();
 }
 
 function renderPins() {
@@ -351,33 +622,33 @@ function renderPins() {
     pin.classList.toggle("selected", friend.id === selectedFriendId);
     pin.style.left = `${position.x * 100}%`;
     pin.style.top = `${position.y * 100}%`;
-    pin.style.setProperty("--friend-color", friend.color);
+    pin.style.setProperty("--friend-color", friend.color || "#53e2ff");
     pin.setAttribute("aria-label", `${friend.name}, ${statusText(friend)}`);
     pin.addEventListener("click", () => {
       selectedFriendId = friend.id;
       renderAll();
     });
 
-    const avatar = avatarElement(friend, "avatar");
     const label = document.createElement("span");
     label.className = "pin-label";
-    label.append(document.createTextNode(friend.name));
+    label.append(document.createTextNode(friend.name || "Friend"));
     const status = document.createElement("small");
     status.textContent = statusText(friend);
     label.append(status);
-    pin.append(avatar, label);
+    pin.append(avatarElement(friend, "avatar"), label);
     els.pinLayer.append(pin);
   });
 }
 
 function renderFriendStrip() {
   els.friendStrip.replaceChildren();
+
   state.friends.forEach((friend) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "friend-chip";
     chip.classList.toggle("active", friend.id === selectedFriendId);
-    chip.style.setProperty("--friend-color", friend.color);
+    chip.style.setProperty("--friend-color", friend.color || "#53e2ff");
     chip.addEventListener("click", () => {
       selectedFriendId = friend.id;
       renderAll();
@@ -387,7 +658,7 @@ function renderFriendStrip() {
     copy.className = "chip-copy";
     const name = document.createElement("span");
     name.className = "chip-name";
-    name.textContent = friend.name;
+    name.textContent = friend.name || "Friend";
     const status = document.createElement("span");
     status.className = "chip-status";
     status.textContent = statusText(friend);
@@ -400,12 +671,13 @@ function renderFriendStrip() {
 
 function renderFriendList() {
   els.friendList.replaceChildren();
+
   state.friends.forEach((friend) => {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "friend-row";
     row.classList.toggle("active", friend.id === selectedFriendId);
-    row.style.setProperty("--friend-color", friend.color);
+    row.style.setProperty("--friend-color", friend.color || "#53e2ff");
     row.addEventListener("click", () => {
       selectedFriendId = friend.id;
       els.friendsDialog.close();
@@ -416,34 +688,51 @@ function renderFriendList() {
     copy.className = "chip-copy";
     const name = document.createElement("span");
     name.className = "chip-name";
-    name.textContent = friend.name;
+    name.textContent = friend.name || "Friend";
     const status = document.createElement("span");
     status.className = "chip-status";
     status.textContent = statusText(friend);
+
     copy.append(name, status);
     row.append(avatarElement(friend, "mini-avatar"), copy);
     els.friendList.append(row);
   });
 }
 
+function renderSelectedFriendSummary() {
+  const selected = selectedFriend();
+  const stage = stageForFriend(selected);
+  els.selectedFriendName.textContent = selected.name || "Your crew";
+  els.selectedFriendStage.textContent = `${stage.name} - ${statusText(selected)}`;
+}
+
+function renderAuthPhotoPreview(photo, name) {
+  renderAvatarInto(els.authPhotoPreview, { name: cleanName(name), photo });
+}
+
 function renderProfilePreview(friend) {
-  els.profilePreview.replaceChildren();
+  renderAvatarInto(els.profilePreview, friend);
+}
+
+function renderAvatarInto(container, friend) {
+  container.replaceChildren();
   if (friend.photo) {
     const image = document.createElement("img");
     image.src = friend.photo;
     image.alt = "";
-    els.profilePreview.append(image);
+    container.append(image);
   } else {
-    els.profilePreview.textContent = initials(friend.name);
+    container.textContent = initials(friend.name);
   }
 }
 
 function renderParsedSchedule() {
   els.parsedSchedule.replaceChildren();
+
   if (!parsedEvents.length) {
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "No sets generated.";
+    empty.textContent = "No sets generated yet.";
     els.parsedSchedule.append(empty);
     return;
   }
@@ -454,7 +743,7 @@ function renderParsedSchedule() {
     const title = document.createElement("strong");
     title.textContent = item.artist;
     const meta = document.createElement("span");
-    meta.textContent = `${formatTime(item.start)} - ${formatTime(item.end)} • ${stageById(item.stageId).name}`;
+    meta.textContent = `${days[item.day].label} - ${formatTime(item.start)} to ${formatTime(item.end)} - ${stageById(item.stageId).name}`;
     row.append(title, meta);
     els.parsedSchedule.append(row);
   });
@@ -472,17 +761,9 @@ async function recognizeSchedule(file) {
   els.ocrStatus.textContent = "Reading schedule picture...";
 
   try {
-    let result;
-    if (typeof window.Tesseract.recognize === "function") {
-      result = await window.Tesseract.recognize(file, "eng", {
-        logger: (message) => updateOcrProgress(message)
-      });
-    } else {
-      const worker = await window.Tesseract.createWorker("eng");
-      result = await worker.recognize(file);
-      await worker.terminate();
-    }
-
+    const result = await window.Tesseract.recognize(file, "eng", {
+      logger: (message) => updateOcrProgress(message)
+    });
     const text = result?.data?.text || "";
     els.ocrText.value = text;
     parsedEvents = parseSchedule(text, els.scheduleDay.value);
@@ -499,6 +780,25 @@ function updateOcrProgress(message) {
   els.ocrStatus.textContent = `${message.status}${percent}`;
 }
 
+async function applySchedule() {
+  if (!parsedEvents.length) {
+    els.ocrStatus.textContent = "No sets to apply.";
+    return;
+  }
+
+  const user = currentUser();
+  user.schedule = parsedEvents;
+  state.user = user;
+
+  try {
+    await persistCurrentMember();
+    renderAll();
+    els.scheduleDialog.close();
+  } catch (error) {
+    els.ocrStatus.textContent = error.message || String(error);
+  }
+}
+
 function parseSchedule(text, defaultDay) {
   const lines = text
     .replace(/\u2028/g, "\n")
@@ -506,10 +806,13 @@ function parseSchedule(text, defaultDay) {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const documentDay = dayIn(text) || defaultDay;
+  let currentDay = dayIn(text) || defaultDay;
   const output = [];
 
   lines.forEach((line, index) => {
+    const lineDay = dayIn(line);
+    if (lineDay) currentDay = lineDay;
+
     const range = parseTimeRange(line);
     if (!range) return;
 
@@ -523,7 +826,7 @@ function parseSchedule(text, defaultDay) {
       id: cryptoId(),
       artist,
       stageId,
-      day: dayIn(line) || documentDay,
+      day: currentDay,
       start: range.start,
       end: range.end
     });
@@ -549,10 +852,7 @@ function parseTimeRange(line) {
     const start = minutes(startHour, startMinute, startPeriod);
     let end = minutes(endHour, endMinute, endPeriod);
 
-    if (end <= start) {
-      end += 24 * 60;
-    }
-
+    if (end <= start) end += 24 * 60;
     return { start, end, matchText: rangeMatch[0] };
   }
 
@@ -627,7 +927,7 @@ function cleanArtist(value) {
   });
 
   return output
-    .replace(/[•|]/g, " ")
+    .replace(/[|]/g, " ")
     .replace(/\s+/g, " ")
     .replace(/^[-–—:\s]+|[-–—:\s]+$/g, "")
     .trim();
@@ -658,16 +958,12 @@ function displayEvent(friend) {
 
 function statusText(friend) {
   const active = activeEvent(friend);
-  if (active) {
-    return `${active.artist} • ${stageById(active.stageId).name}`;
-  }
+  if (active) return `${active.artist} - ${stageById(active.stageId).name}`;
 
   const display = displayEvent(friend);
-  if (display) {
-    return `${display.start > state.selectedMinute ? "Next" : "Last"}: ${display.artist}`;
-  }
+  if (display) return `${display.start > state.selectedMinute ? "Next" : "Last"}: ${display.artist}`;
 
-  return "No schedule";
+  return "No schedule yet";
 }
 
 function stagePlacements() {
@@ -685,21 +981,33 @@ function offsetPosition(friend, stage, groups) {
 
   const index = group.indexOf(friend.id);
   const angle = (index / group.length) * Math.PI * 2;
-  const radius = 0.036;
+  const radius = 0.038;
   return {
     x: clamp(stage.x + Math.cos(angle) * radius, 0.06, 0.94),
     y: clamp(stage.y + Math.sin(angle) * radius, 0.08, 0.94)
   };
 }
 
-function stageById(id) {
-  return stages.find((stage) => stage.id === id) || stages.at(-1);
+function selectedFriend() {
+  return state.friends.find((friend) => friend.id === selectedFriendId) || currentUser();
+}
+
+function currentUser() {
+  return state.friends.find((friend) => friend.id === state.user?.id) || state.user || {
+    id: "",
+    name: "You",
+    email: "",
+    photo: "",
+    color: "#53e2ff",
+    schedule: []
+  };
 }
 
 function avatarElement(friend, className) {
   const avatar = document.createElement("span");
   avatar.className = className;
-  avatar.style.setProperty("--friend-color", friend.color);
+  avatar.style.setProperty("--friend-color", friend.color || "#53e2ff");
+
   if (friend.photo) {
     const image = document.createElement("img");
     image.src = friend.photo;
@@ -708,84 +1016,120 @@ function avatarElement(friend, className) {
   } else {
     avatar.textContent = initials(friend.name);
   }
+
   return avatar;
 }
 
-function encodeFriend(friend) {
-  const payload = {
-    version: 1,
-    friend: {
-      id: friend.id === "you" ? cryptoId() : friend.id,
-      name: friend.name,
-      handle: friend.handle,
-      color: friend.color,
-      photo: friend.photo,
-      schedule: friend.schedule
-    }
+function normalizeMember(member) {
+  return {
+    id: member.id || cryptoId(),
+    name: cleanName(member.name),
+    email: member.email || "",
+    photo: member.photo || "",
+    color: member.color || randomColor(),
+    groupCode: member.groupCode || state.groupCode || "",
+    schedule: Array.isArray(member.schedule) ? member.schedule.map(normalizeEvent).filter(Boolean) : []
   };
-  return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
 }
 
-function importFriendCode(code) {
+function sanitizeMember(member) {
+  const normalized = normalizeMember(member);
+  return {
+    name: normalized.name,
+    email: normalized.email,
+    photo: normalized.photo,
+    color: normalized.color,
+    groupCode: normalized.groupCode,
+    schedule: normalized.schedule,
+    updatedAt: member.updatedAt
+  };
+}
+
+function normalizeEvent(item) {
+  const start = Number(item.start ?? item.startMinute);
+  const end = Number(item.end ?? item.endMinute);
+  const day = days[item.day] ? item.day : "friday";
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return {
+    id: item.id || cryptoId(),
+    artist: item.artist || "Imported Set",
+    stageId: item.stageId || item.stageID || "speedway-entry",
+    day,
+    start,
+    end
+  };
+}
+
+function friendsFromGroup(group) {
+  return Object.values(group.members || {})
+    .map(normalizeMember)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}
+
+function loadLocalStore() {
   try {
-    const payload = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
-    const friend = payload.friend;
-    if (!friend?.name || !Array.isArray(friend.schedule)) {
-      return "That code is not a Festival GPS pin.";
-    }
-
-    const imported = {
-      id: friend.id || cryptoId(),
-      name: cleanName(friend.name),
-      handle: friend.handle || "",
-      color: friend.color || randomColor(),
-      photo: friend.photo || "",
-      schedule: friend.schedule.map((item) => ({
-        id: item.id || cryptoId(),
-        artist: item.artist || "Imported Set",
-        stageId: item.stageId || item.stageID || "speedway-entry",
-        day: item.day || "friday",
-        start: Number(item.start ?? item.startMinute),
-        end: Number(item.end ?? item.endMinute)
-      })).filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end))
-    };
-
-    const existingIndex = state.friends.findIndex((item) => item.id === imported.id);
-    if (existingIndex >= 0) {
-      state.friends[existingIndex] = imported;
-    } else {
-      state.friends.push(imported);
-    }
-    selectedFriendId = imported.id;
-    saveState();
-    els.friendCode.value = "";
-    return `${imported.name} imported.`;
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (stored?.groups) return stored;
   } catch {
-    return "That code could not be imported.";
+    localStorage.removeItem(STORAGE_KEY);
   }
+
+  return {
+    session: null,
+    groups: {},
+    selectedDay: "friday",
+    selectedMinute: days.friday.start
+  };
 }
 
-function initials(name) {
-  const letters = cleanName(name)
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-  return letters || "?";
+function saveLocalStore() {
+  localStore.selectedDay = state.selectedDay;
+  localStore.selectedMinute = state.selectedMinute;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(localStore));
 }
 
-function cleanName(name) {
-  const value = String(name || "").trim();
-  return value || "You";
+function resetState() {
+  state = {
+    selectedDay: localStore.selectedDay || "friday",
+    selectedMinute: localStore.selectedMinute || days.friday.start,
+    user: null,
+    groupCode: "",
+    friends: []
+  };
+  selectedFriendId = "";
 }
 
-async function fileToDataUrl(file) {
+function setMapImage() {
+  document.querySelector(".map-photo").style.backgroundImage = `linear-gradient(rgba(6, 7, 17, 0.10), rgba(6, 7, 17, 0.30)), url("${MAP_URL}")`;
+}
+
+async function imageFileToDataUrl(file) {
+  const image = await loadImage(file);
+  const maxSize = 420;
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const width = Math.round(image.width * scale);
+  const height = Math.round(image.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+function loadImage(file) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read that image."));
+    };
+    image.src = url;
   });
 }
 
@@ -819,6 +1163,29 @@ function normalize(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function normalizeGroupCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "")
+    .slice(0, 24);
+}
+
+function initials(name) {
+  const letters = cleanName(name)
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+  return letters || "?";
+}
+
+function cleanName(name) {
+  const value = String(name || "").trim();
+  return value || "You";
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -834,6 +1201,19 @@ function randomColor() {
 
 function cryptoId() {
   return globalThis.crypto?.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function humanAuthError(error) {
+  const code = error.code || "";
+  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "Email or password did not match.";
+  if (code.includes("weak-password")) return "Use a password with at least 6 characters.";
+  if (code.includes("invalid-email")) return "Enter a valid email address.";
+  if (code.includes("network")) return "Network issue. Try again when your connection is steady.";
+  return error.message || String(error);
+}
+
+function stageById(id) {
+  return stages.find((stage) => stage.id === id) || stages.at(-1);
 }
 
 function registerServiceWorker() {

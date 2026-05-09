@@ -4,7 +4,7 @@ Festival GPS is a SwiftUI iOS prototype for finding friends at EDC Las Vegas 202
 
 ## Web App
 
-The Safari-installable PWA lives in `FestivalGPSWeb/`.
+The Safari-installable PWA lives in `FestivalGPSWeb/`. It is designed for GitHub Pages and can also be deployed to Firebase Hosting.
 
 Run it locally:
 
@@ -13,16 +13,20 @@ cd FestivalGPSWeb
 python3 -m http.server 8080
 ```
 
-Then open `http://localhost:8080` on the laptop. On iPhone, deploy the folder to an HTTPS host such as Netlify, Vercel, GitHub Pages, Firebase Hosting, or Cloudflare Pages, then open the URL in Safari and use Share > Add to Home Screen.
+Then open `http://localhost:8080` on the laptop. On iPhone, open the deployed GitHub Pages URL in Safari and use Share > Add to Home Screen.
 
 The web app includes:
 
 - PWA manifest and service worker.
 - EDC map with fallback artwork.
 - Timeline-driven friend pins.
-- Profile photo upload.
-- Schedule picture OCR through Tesseract.js.
-- Pin-code export/import so friends can share their generated profile and schedule without a backend.
+- Email/password account flow.
+- Profile photo upload with in-browser image compression.
+- Group-code entry so friends in the same group share pins and routes.
+- Schedule picture OCR through Tesseract.js for Friday, Saturday, and Sunday schedules.
+- Firebase Auth + Firestore integration with `localStorage` fallback for local demos.
+
+See `FIREBASE_SETUP.md` before using it with real friends. The published GitHub Pages app runs in local demo mode until Firebase config is added in `FestivalGPSWeb/firebase-config.js`.
 
 ## Open
 

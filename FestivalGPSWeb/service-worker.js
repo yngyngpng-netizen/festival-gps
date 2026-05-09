@@ -1,9 +1,10 @@
-const CACHE_NAME = "festival-gps-v1";
+const CACHE_NAME = "festival-gps-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./firebase-config.js",
   "./manifest.webmanifest",
   "./assets/icon.svg"
 ];
