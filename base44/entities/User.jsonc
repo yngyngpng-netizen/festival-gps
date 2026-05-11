@@ -1,0 +1,24 @@
+{
+  "name": "User",
+  "type": "object",
+  "title": "Festival GPS User",
+  "description": "Extra profile fields used by Festival GPS group sharing.",
+  "properties": {
+    "festivalName": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "festivalGroupCode": {
+      "type": "string",
+      "maxLength": 24
+    },
+    "profilePhoto": {
+      "type": "string",
+      "maxLength": 800000
+    },
+    "pinColor": {
+      "type": "string",
+      "maxLength": 16
+    }
+  }
+}

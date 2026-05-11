@@ -1,0 +1,7 @@
+{
+  "name": "Festival GPS",
+  "description": "EDC Las Vegas 2026 crew schedule map with profile-photo pins, group codes, and timeline routes.",
+  "site": {
+    "outputDirectory": "./FestivalGPSWeb"
+  }
+}

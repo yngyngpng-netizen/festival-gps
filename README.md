@@ -4,7 +4,7 @@ Festival GPS is a SwiftUI iOS prototype for finding friends at EDC Las Vegas 202
 
 ## Web App
 
-The Safari-installable PWA lives in `FestivalGPSWeb/`. It is designed for GitHub Pages and can also be deployed to Firebase Hosting.
+The Safari-installable PWA lives in `FestivalGPSWeb/`. It is designed for Base44 hosting, GitHub Pages fallback, and Firebase fallback.
 
 Run it locally:
 
@@ -24,9 +24,10 @@ The web app includes:
 - Profile photo upload with in-browser image compression.
 - Group-code entry so friends in the same group share pins and routes.
 - Schedule picture OCR through Tesseract.js for Friday, Saturday, and Sunday schedules.
+- Base44 Auth + Entities sync when `FestivalGPSWeb/base44-config.js` has an app id.
 - Firebase Auth + Firestore integration with `localStorage` fallback for local demos.
 
-See `FIREBASE_SETUP.md` before using it with real friends. The published GitHub Pages app runs in local demo mode until Firebase config is added in `FestivalGPSWeb/firebase-config.js`.
+Base44 resources live in `base44/`: email/password auth is enabled in `base44/auth/config.jsonc`, and group sharing is stored in the `CrewMember` entity. The published GitHub Pages app runs in local demo mode until `FestivalGPSWeb/base44-config.js` or `FestivalGPSWeb/firebase-config.js` is filled.
 
 ## Open
 

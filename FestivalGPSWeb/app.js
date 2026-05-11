@@ -1,3 +1,4 @@
+import { BASE44_CONFIG, base44IsConfigured } from "./base44-config.js";
 import { firebaseConfig, firebaseIsConfigured } from "./firebase-config.js";
 
 const STORAGE_KEY = "festival-gps-pwa-v2";
@@ -59,8 +60,10 @@ let state = {
 let localStore = loadLocalStore();
 let services = {
   cloud: false,
+  provider: "local",
   auth: null,
   db: null,
+  base44: null,
   unsubscribeGroup: null
 };
 let fb = {};
@@ -69,6 +72,8 @@ let parsedEvents = [];
 let authMode = "create";
 let pendingAuthPhoto = "";
 let pendingProfilePhoto = "";
+let pendingAuthFile = null;
+let pendingProfileFile = null;
 
 const els = {};
 
@@ -151,6 +156,7 @@ function bindEvents() {
   els.authName.addEventListener("input", () => renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value));
   els.authPhoto.addEventListener("change", async () => {
     const file = els.authPhoto.files?.[0];
+    pendingAuthFile = file || null;
     pendingAuthPhoto = file ? await imageFileToDataUrl(file) : "";
     renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value);
   });
@@ -196,6 +202,7 @@ function bindEvents() {
 
   els.profilePhoto.addEventListener("change", async () => {
     const file = els.profilePhoto.files?.[0];
+    pendingProfileFile = file || null;
     pendingProfilePhoto = file ? await imageFileToDataUrl(file) : "";
     renderProfilePreview({ ...currentUser(), name: els.profileName.value, photo: pendingProfilePhoto || currentUser().photo });
   });
@@ -241,11 +248,51 @@ function bindEvents() {
 }
 
 async function initCloud() {
+  if (base44IsConfigured()) {
+    const started = await initBase44Cloud();
+    if (started) return;
+  }
+
   if (!firebaseIsConfigured()) {
     els.cloudBadge.textContent = "Local demo store";
     return;
   }
 
+  await initFirebaseCloud();
+}
+
+async function initBase44Cloud() {
+  try {
+    const { createClient } = await import(BASE44_CONFIG.sdkUrl);
+    const clientConfig = { appId: BASE44_CONFIG.appId };
+    if (BASE44_CONFIG.serverUrl) clientConfig.serverUrl = BASE44_CONFIG.serverUrl;
+
+    services.base44 = createClient(clientConfig);
+    services.cloud = true;
+    services.provider = "base44";
+    els.cloudBadge.textContent = "Base44 secure sync";
+
+    const isAuthenticated = await services.base44.auth.isAuthenticated().catch(() => false);
+    if (isAuthenticated) {
+      const account = await services.base44.auth.me();
+      const lastGroup = normalizeGroupCode(localStorage.getItem(LAST_GROUP_KEY) || account.festivalGroupCode || "");
+      if (lastGroup) {
+        await enterBase44Group(lastGroup, profileFromBase44User(account, lastGroup), { preserveExisting: true });
+      }
+    }
+
+    return true;
+  } catch (error) {
+    services.cloud = false;
+    services.provider = "local";
+    services.base44 = null;
+    els.cloudBadge.textContent = firebaseIsConfigured() ? "Firebase secure sync" : "Local demo store";
+    els.authMessage.textContent = `Base44 did not start: ${error.message || error}`;
+    return false;
+  }
+}
+
+async function initFirebaseCloud() {
   try {
     const [appModule, authModule, firestoreModule] = await Promise.all([
       import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
@@ -258,6 +305,7 @@ async function initCloud() {
     services.auth = fb.getAuth(app);
     services.db = fb.getFirestore(app);
     services.cloud = true;
+    services.provider = "firebase";
     els.cloudBadge.textContent = "Firebase secure sync";
 
     fb.onAuthStateChanged(services.auth, async (firebaseUser) => {
@@ -287,6 +335,7 @@ async function initCloud() {
     });
   } catch (error) {
     services.cloud = false;
+    services.provider = "local";
     els.cloudBadge.textContent = "Local demo store";
     els.authMessage.textContent = `Firebase did not start: ${error.message || error}`;
   }
@@ -327,7 +376,9 @@ async function handleAuthSubmit(event) {
   try {
     if (!groupCode) throw new Error("Enter a group code.");
 
-    if (services.cloud) {
+    if (services.provider === "base44") {
+      await authenticateWithBase44(profile, password, groupCode);
+    } else if (services.provider === "firebase") {
       await authenticateWithFirebase(profile, password, groupCode);
     } else {
       enterLocalGroup(profile, groupCode);
@@ -335,6 +386,7 @@ async function handleAuthSubmit(event) {
 
     els.authForm.reset();
     pendingAuthPhoto = "";
+    pendingAuthFile = null;
     renderAuthPhotoPreview("", "");
     renderAuthGate();
   } catch (error) {
@@ -342,6 +394,35 @@ async function handleAuthSubmit(event) {
   } finally {
     setBusy(false);
   }
+}
+
+async function authenticateWithBase44(profile, password, groupCode) {
+  const base44 = services.base44;
+
+  if (authMode === "create") {
+    try {
+      await base44.auth.register({
+        email: profile.email,
+        password,
+        referral_code: null,
+        turnstile_token: null
+      });
+    } catch (error) {
+      if (!String(error.message || error).toLowerCase().includes("already")) throw error;
+    }
+  }
+
+  const { user } = await base44.auth.loginViaEmailPassword(profile.email, password);
+  const photo = await uploadBase44Photo(pendingAuthFile, profile.photo);
+  const memberProfile = {
+    ...profile,
+    userId: user.id,
+    email: user.email || profile.email,
+    photo
+  };
+
+  await updateBase44UserProfile(memberProfile, groupCode);
+  await enterBase44Group(groupCode, memberProfile, { preserveExisting: authMode === "signin" });
 }
 
 async function authenticateWithFirebase(profile, password, groupCode) {
@@ -361,6 +442,41 @@ async function authenticateWithFirebase(profile, password, groupCode) {
   profile.id = credential.user.uid;
   await fb.updateProfile(credential.user, { displayName: profile.name });
   await enterCloudGroup(groupCode, profile, { preserveExisting: authMode === "signin" });
+}
+
+async function enterBase44Group(groupCode, profile, options = {}) {
+  const base44 = services.base44;
+  const CrewMember = base44.entities.CrewMember;
+  const account = await base44.auth.me();
+  const userId = profile.userId || account.id;
+
+  await updateBase44UserProfile({ ...profile, userId }, groupCode);
+
+  const matches = await CrewMember.filter({ userId, groupCode });
+  const existing = Array.isArray(matches) ? matches[0] : null;
+  const memberData = sanitizeMember({
+    ...existing,
+    ...profile,
+    id: existing?.id || profile.id,
+    userId,
+    groupCode,
+    name: profile.name || existing?.name || account.full_name || "You",
+    email: profile.email || existing?.email || account.email || "",
+    photo: profile.photo || existing?.photo || account.profilePhoto || "",
+    color: existing?.color || profile.color || account.pinColor || randomColor(),
+    schedule: options.preserveExisting ? existing?.schedule || profile.schedule || [] : profile.schedule || existing?.schedule || []
+  });
+
+  const saved = existing?.id
+    ? await CrewMember.update(existing.id, memberData)
+    : await CrewMember.create(memberData);
+  const member = normalizeMember(saved);
+
+  state.user = member;
+  state.groupCode = groupCode;
+  selectedFriendId = member.id;
+  localStorage.setItem(LAST_GROUP_KEY, groupCode);
+  await subscribeToBase44Group(groupCode);
 }
 
 async function enterCloudGroup(groupCode, profile, options = {}) {
@@ -390,6 +506,37 @@ async function enterCloudGroup(groupCode, profile, options = {}) {
   selectedFriendId = state.user.id;
   localStorage.setItem(LAST_GROUP_KEY, groupCode);
   subscribeToGroup(groupCode);
+}
+
+async function subscribeToBase44Group(groupCode) {
+  if (services.unsubscribeGroup) services.unsubscribeGroup();
+
+  await refreshBase44Group(groupCode);
+
+  services.unsubscribeGroup = services.base44.entities.CrewMember.subscribe((event) => {
+    if (!event?.data?.groupCode || event.data.groupCode === groupCode) {
+      refreshBase44Group(groupCode);
+    }
+  });
+}
+
+async function refreshBase44Group(groupCode) {
+  try {
+    const records = await services.base44.entities.CrewMember.filter({ groupCode });
+    state.friends = records
+      .map((record) => normalizeMember(record))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+    const current = state.friends.find((friend) => (
+      friend.id === state.user?.id || (friend.userId && friend.userId === state.user?.userId)
+    ));
+    if (current) state.user = current;
+    if (!selectedFriendId && state.user) selectedFriendId = state.user.id;
+    renderAuthGate();
+  } catch (error) {
+    els.syncStatus.textContent = "sync error";
+    els.authMessage.textContent = error.message || String(error);
+  }
 }
 
 function subscribeToGroup(groupCode) {
@@ -442,7 +589,17 @@ async function persistCurrentMember() {
   const user = currentUser();
   if (!user?.id || !state.groupCode) return;
 
-  if (services.cloud) {
+  if (services.provider === "base44") {
+    const updated = sanitizeMember({
+      ...user,
+      groupCode: state.groupCode,
+      userId: user.userId || user.id
+    });
+    const saved = await services.base44.entities.CrewMember.update(user.id, updated);
+    state.user = normalizeMember(saved);
+    await updateBase44UserProfile(state.user, state.groupCode);
+    await refreshBase44Group(state.groupCode);
+  } else if (services.provider === "firebase") {
     await fb.setDoc(fb.doc(services.db, "groups", state.groupCode, "members", user.id), sanitizeMember({
       ...user,
       groupCode: state.groupCode,
@@ -461,12 +618,17 @@ async function persistCurrentMember() {
 async function saveProfile() {
   const user = currentUser();
   user.name = cleanName(els.profileName.value);
-  if (pendingProfilePhoto) user.photo = pendingProfilePhoto;
+  if (pendingProfilePhoto) {
+    user.photo = services.provider === "base44"
+      ? await uploadBase44Photo(pendingProfileFile, pendingProfilePhoto)
+      : pendingProfilePhoto;
+  }
   state.user = user;
 
   try {
     await persistCurrentMember();
     pendingProfilePhoto = "";
+    pendingProfileFile = null;
     renderAll();
     els.profileMessage.textContent = "Saved to your group.";
   } catch (error) {
@@ -478,7 +640,13 @@ async function signOutUser() {
   if (services.unsubscribeGroup) services.unsubscribeGroup();
   services.unsubscribeGroup = null;
 
-  if (services.cloud && services.auth.currentUser) {
+  if (services.provider === "base44" && services.base44) {
+    try {
+      services.base44.auth.logout();
+    } catch {
+      localStorage.removeItem("base44_token");
+    }
+  } else if (services.provider === "firebase" && services.auth.currentUser) {
     await fb.signOut(services.auth);
   }
 
@@ -537,7 +705,7 @@ function renderAll() {
   els.startTimeLabel.textContent = formatTime(day.start);
   els.endTimeLabel.textContent = formatTime(day.end);
   els.currentContext.textContent = `${day.label} ${day.date} - ${formatTime(state.selectedMinute)}`;
-  els.syncStatus.textContent = services.cloud ? "live sync" : "local demo";
+  els.syncStatus.textContent = services.provider === "base44" ? "Base44 live" : (services.cloud ? "live sync" : "local demo");
   els.groupCodeLabel.textContent = state.groupCode;
   els.friendGroupCode.textContent = state.groupCode;
   els.profileGroupCode.textContent = state.groupCode;
@@ -1023,6 +1191,7 @@ function avatarElement(friend, className) {
 function normalizeMember(member) {
   return {
     id: member.id || cryptoId(),
+    userId: member.userId || member.authUserId || "",
     name: cleanName(member.name),
     email: member.email || "",
     photo: member.photo || "",
@@ -1035,6 +1204,7 @@ function normalizeMember(member) {
 function sanitizeMember(member) {
   const normalized = normalizeMember(member);
   return {
+    userId: normalized.userId,
     name: normalized.name,
     email: normalized.email,
     photo: normalized.photo,
@@ -1043,6 +1213,41 @@ function sanitizeMember(member) {
     schedule: normalized.schedule,
     updatedAt: member.updatedAt
   };
+}
+
+function profileFromBase44User(account, groupCode) {
+  return {
+    id: "",
+    userId: account.id || "",
+    name: cleanName(account.festivalName || account.full_name),
+    email: account.email || "",
+    photo: account.profilePhoto || "",
+    color: account.pinColor || randomColor(),
+    groupCode,
+    schedule: []
+  };
+}
+
+async function updateBase44UserProfile(profile, groupCode) {
+  await services.base44.auth.updateMe({
+    full_name: cleanName(profile.name),
+    festivalName: cleanName(profile.name),
+    festivalGroupCode: groupCode,
+    profilePhoto: profile.photo || "",
+    pinColor: profile.color || randomColor()
+  });
+}
+
+async function uploadBase44Photo(file, fallbackDataUrl) {
+  if (services.provider !== "base44" || !file) return fallbackDataUrl;
+
+  try {
+    const uploadFile = dataUrlToFile(fallbackDataUrl || await imageFileToDataUrl(file), "festival-profile.jpg");
+    const result = await services.base44.integrations.Core.UploadFile({ file: uploadFile });
+    return result?.file_url || fallbackDataUrl;
+  } catch {
+    return fallbackDataUrl;
+  }
 }
 
 function normalizeEvent(item) {
@@ -1115,6 +1320,17 @@ async function imageFileToDataUrl(file) {
   const context = canvas.getContext("2d");
   context.drawImage(image, 0, 0, width, height);
   return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+function dataUrlToFile(dataUrl, filename) {
+  const [header, encoded] = String(dataUrl).split(",");
+  const mime = header.match(/data:(.*?);/)?.[1] || "image/jpeg";
+  const binary = atob(encoded || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], filename, { type: mime });
 }
 
 function loadImage(file) {
@@ -1209,6 +1425,7 @@ function humanAuthError(error) {
   if (code.includes("weak-password")) return "Use a password with at least 6 characters.";
   if (code.includes("invalid-email")) return "Enter a valid email address.";
   if (code.includes("network")) return "Network issue. Try again when your connection is steady.";
+  if (String(error.message || "").toLowerCase().includes("unauthorized")) return "Email or password did not match.";
   return error.message || String(error);
 }
 
