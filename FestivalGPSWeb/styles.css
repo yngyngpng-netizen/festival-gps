@@ -203,6 +203,70 @@ label {
   font-weight: 800;
 }
 
+.group-entry {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.group-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.group-mode button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.group-mode button.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: white;
+}
+
+.group-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
+}
+
+.icon-mini {
+  width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--ink);
+}
+
+.icon-mini svg {
+  width: 19px;
+  height: 19px;
+  fill: currentColor;
+}
+
+.verification-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(173, 255, 104, 0.28);
+  border-radius: var(--radius);
+  background: rgba(173, 255, 104, 0.08);
+}
+
 input,
 select,
 textarea {
@@ -420,6 +484,23 @@ textarea {
   border-color: transparent;
 }
 
+.icon-button.live.active {
+  background: rgba(173, 255, 104, 0.22);
+  border-color: rgba(173, 255, 104, 0.74);
+  color: var(--green);
+  box-shadow: 0 0 18px rgba(173, 255, 104, 0.18);
+}
+
+.icon-button.live.fresh {
+  background: var(--green);
+  color: #061017;
+  border-color: transparent;
+}
+
+.icon-button.live.starting svg {
+  animation: pulse-ring 1s ease-in-out infinite;
+}
+
 .icon-button.ghost {
   background: rgba(255, 255, 255, 0.08);
 }
@@ -576,7 +657,23 @@ textarea {
   z-index: 10;
 }
 
+.friend-pin.live .avatar {
+  box-shadow:
+    0 0 0 5px rgba(173, 255, 104, 0.18),
+    0 0 24px rgba(173, 255, 104, 0.42);
+}
+
+.friend-pin.live .avatar::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border: 2px solid rgba(173, 255, 104, 0.32);
+  border-radius: 50%;
+  animation: pulse-ring 1.6s ease-out infinite;
+}
+
 .avatar {
+  position: relative;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -663,6 +760,17 @@ textarea {
 .now-card strong {
   display: block;
   font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-status {
+  display: block;
+  margin-top: 3px;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 900;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -964,5 +1072,17 @@ dialog::backdrop {
   .now-card > span {
     max-width: 100%;
     text-align: left;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    opacity: 0.8;
+    transform: scale(0.88);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
   }
 }

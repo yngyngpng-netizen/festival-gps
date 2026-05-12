@@ -5,6 +5,15 @@ const STORAGE_KEY = "festival-gps-pwa-v2";
 const LAST_GROUP_KEY = "festival-gps-last-group";
 const MAP_URL = "https://d3vhc53cl8e8km.cloudfront.net/hello-staging/wp-content/uploads/sites/21/2026/05/08131244/edclv_2026_de_festival_map_1080x1350_r05_blurred.jpg";
 const SVG_NS = "http://www.w3.org/2000/svg";
+const EMAIL_ONLY_SECRET = "festival-gps-edc-2026-email-only-v1";
+const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
+const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
+const EDC_GEO_BOUNDS = {
+  north: 36.282,
+  south: 36.258,
+  west: -115.026,
+  east: -114.996
+};
 
 const days = {
   friday: { label: "Friday", short: "Fri", date: "May 15", start: 17 * 60, end: 29 * 60 + 30 },
@@ -69,13 +78,19 @@ let services = {
 let fb = {};
 let selectedFriendId = "";
 let parsedEvents = [];
-let authMode = "create";
 let pendingAuthPhoto = "";
 let pendingProfilePhoto = "";
 let pendingAuthFile = null;
 let pendingProfileFile = null;
+let pendingVerification = null;
+let groupMode = "create";
+let locationWatchId = null;
+let locationSharing = false;
+let lastLocationPersistedAt = 0;
 
 const els = {};
+
+class VerificationPendingError extends Error {}
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -86,6 +101,7 @@ async function init() {
   renderDayButtons();
   renderStages();
   bindEvents();
+  setGroupMode("create");
   await initCloud();
   hydrateLocalSession();
   renderAuthGate();
@@ -98,12 +114,16 @@ function bindElements() {
     "authForm",
     "authName",
     "authEmail",
-    "authPassword",
     "authGroupCode",
+    "authVerificationCode",
     "authPhoto",
     "authPhotoPreview",
     "authSubmitButton",
-    "authModeButton",
+    "createGroupButton",
+    "joinGroupButton",
+    "regenerateGroupButton",
+    "resendCodeButton",
+    "verificationPanel",
     "authMessage",
     "cloudBadge",
     "currentContext",
@@ -112,6 +132,7 @@ function bindElements() {
     "groupCodeLabel",
     "friendsButton",
     "profileButton",
+    "locationButton",
     "scheduleButton",
     "dayButtons",
     "timeRange",
@@ -121,6 +142,7 @@ function bindElements() {
     "friendStrip",
     "selectedFriendName",
     "selectedFriendStage",
+    "locationStatus",
     "stageLayer",
     "routeLayer",
     "pinLayer",
@@ -152,8 +174,19 @@ function bindElements() {
 
 function bindEvents() {
   els.authForm.addEventListener("submit", handleAuthSubmit);
-  els.authModeButton.addEventListener("click", () => setAuthMode(authMode === "create" ? "signin" : "create"));
   els.authName.addEventListener("input", () => renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value));
+  els.createGroupButton.addEventListener("click", () => setGroupMode("create"));
+  els.joinGroupButton.addEventListener("click", () => setGroupMode("join"));
+  els.regenerateGroupButton.addEventListener("click", () => {
+    els.authGroupCode.value = generateGroupCode();
+    clearVerificationStep();
+  });
+  els.resendCodeButton.addEventListener("click", resendVerificationCode);
+  els.authEmail.addEventListener("input", clearVerificationStep);
+  els.authGroupCode.addEventListener("input", clearVerificationStep);
+  els.authVerificationCode.addEventListener("input", () => {
+    els.authVerificationCode.value = els.authVerificationCode.value.replace(/\D/g, "").slice(0, 6);
+  });
   els.authPhoto.addEventListener("change", async () => {
     const file = els.authPhoto.files?.[0];
     pendingAuthFile = file || null;
@@ -179,6 +212,8 @@ function bindEvents() {
     renderProfilePreview(user);
     openDialog(els.profileDialog);
   });
+
+  els.locationButton.addEventListener("click", toggleLiveLocation);
 
   els.scheduleButton.addEventListener("click", () => {
     els.scheduleDay.value = state.selectedDay;
@@ -245,6 +280,9 @@ function bindEvents() {
   });
 
   els.applyScheduleButton.addEventListener("click", applySchedule);
+
+  window.addEventListener("online", renderAll);
+  window.addEventListener("offline", renderAll);
 }
 
 async function initCloud() {
@@ -362,6 +400,17 @@ async function handleAuthSubmit(event) {
   setBusy(true);
   els.authMessage.textContent = "";
 
+  if (pendingVerification) {
+    try {
+      await verifyBase44Code();
+      return;
+    } catch (error) {
+      els.authMessage.textContent = humanAuthError(error);
+      setBusy(false);
+      return;
+    }
+  }
+
   const profile = {
     id: "",
     name: cleanName(els.authName.value),
@@ -371,10 +420,11 @@ async function handleAuthSubmit(event) {
     schedule: []
   };
   const groupCode = normalizeGroupCode(els.authGroupCode.value);
-  const password = els.authPassword.value;
 
   try {
+    if (!validEmail(profile.email)) throw new Error("Enter a valid email address.");
     if (!groupCode) throw new Error("Enter a group code.");
+    const password = await emailOnlyPassword(profile.email);
 
     if (services.provider === "base44") {
       await authenticateWithBase44(profile, password, groupCode);
@@ -387,10 +437,14 @@ async function handleAuthSubmit(event) {
     els.authForm.reset();
     pendingAuthPhoto = "";
     pendingAuthFile = null;
+    clearVerificationStep();
+    if (groupMode === "create") els.authGroupCode.value = generateGroupCode();
     renderAuthPhotoPreview("", "");
     renderAuthGate();
   } catch (error) {
-    els.authMessage.textContent = humanAuthError(error);
+    if (!(error instanceof VerificationPendingError)) {
+      els.authMessage.textContent = humanAuthError(error);
+    }
   } finally {
     setBusy(false);
   }
@@ -399,19 +453,29 @@ async function handleAuthSubmit(event) {
 async function authenticateWithBase44(profile, password, groupCode) {
   const base44 = services.base44;
 
-  if (authMode === "create") {
-    try {
-      await base44.auth.register({
-        email: profile.email,
-        password,
-        referral_code: null,
-        turnstile_token: null
-      });
-    } catch (error) {
-      if (!String(error.message || error).toLowerCase().includes("already")) throw error;
-    }
+  try {
+    await base44.auth.register({
+      email: profile.email,
+      password,
+      referral_code: null,
+      turnstile_token: null
+    });
+  } catch (error) {
+    if (!alreadyExistsError(error)) throw error;
+    await loginExistingBase44User(profile, password, groupCode);
+    return;
   }
 
+  pendingVerification = { profile, password, groupCode };
+  els.verificationPanel.hidden = false;
+  els.authVerificationCode.focus();
+  els.authSubmitButton.textContent = "Verify and enter";
+  els.authMessage.textContent = "Check your email for the 6-digit code, then enter it here.";
+  throw new VerificationPendingError();
+}
+
+async function loginExistingBase44User(profile, password, groupCode) {
+  const base44 = services.base44;
   const { user } = await base44.auth.loginViaEmailPassword(profile.email, password);
   const photo = await uploadBase44Photo(pendingAuthFile, profile.photo);
   const memberProfile = {
@@ -422,26 +486,46 @@ async function authenticateWithBase44(profile, password, groupCode) {
   };
 
   await updateBase44UserProfile(memberProfile, groupCode);
-  await enterBase44Group(groupCode, memberProfile, { preserveExisting: authMode === "signin" });
+  await enterBase44Group(groupCode, memberProfile, { preserveExisting: true });
+}
+
+async function verifyBase44Code() {
+  const otpCode = els.authVerificationCode.value.trim();
+  if (!/^\d{6}$/.test(otpCode)) throw new Error("Enter the 6-digit verification code.");
+
+  const { profile, password, groupCode } = pendingVerification;
+  const result = await services.base44.auth.verifyOtp({
+    email: profile.email,
+    otpCode
+  });
+  const token = result?.access_token || result?.accessToken;
+  if (token && typeof services.base44.setToken === "function") {
+    services.base44.setToken(token);
+  }
+
+  await loginExistingBase44User(profile, password, groupCode);
+  els.authForm.reset();
+  pendingAuthPhoto = "";
+  pendingAuthFile = null;
+  clearVerificationStep();
+  if (groupMode === "create") els.authGroupCode.value = generateGroupCode();
+  renderAuthPhotoPreview("", "");
+  renderAuthGate();
 }
 
 async function authenticateWithFirebase(profile, password, groupCode) {
   let credential;
 
-  if (authMode === "create") {
-    try {
-      credential = await fb.createUserWithEmailAndPassword(services.auth, profile.email, password);
-    } catch (error) {
-      if (error.code !== "auth/email-already-in-use") throw error;
-      credential = await fb.signInWithEmailAndPassword(services.auth, profile.email, password);
-    }
-  } else {
+  try {
+    credential = await fb.createUserWithEmailAndPassword(services.auth, profile.email, password);
+  } catch (error) {
+    if (error.code !== "auth/email-already-in-use") throw error;
     credential = await fb.signInWithEmailAndPassword(services.auth, profile.email, password);
   }
 
   profile.id = credential.user.uid;
   await fb.updateProfile(credential.user, { displayName: profile.name });
-  await enterCloudGroup(groupCode, profile, { preserveExisting: authMode === "signin" });
+  await enterCloudGroup(groupCode, profile, { preserveExisting: true });
 }
 
 async function enterBase44Group(groupCode, profile, options = {}) {
@@ -585,7 +669,7 @@ function enterLocalGroup(profile, groupCode) {
   saveLocalStore();
 }
 
-async function persistCurrentMember() {
+async function persistCurrentMember(options = {}) {
   const user = currentUser();
   if (!user?.id || !state.groupCode) return;
 
@@ -597,7 +681,9 @@ async function persistCurrentMember() {
     });
     const saved = await services.base44.entities.CrewMember.update(user.id, updated);
     state.user = normalizeMember(saved);
-    await updateBase44UserProfile(state.user, state.groupCode);
+    if (options.updateProfile !== false) {
+      await updateBase44UserProfile(state.user, state.groupCode);
+    }
     await refreshBase44Group(state.groupCode);
   } else if (services.provider === "firebase") {
     await fb.setDoc(fb.doc(services.db, "groups", state.groupCode, "members", user.id), sanitizeMember({
@@ -637,6 +723,7 @@ async function saveProfile() {
 }
 
 async function signOutUser() {
+  stopLiveLocation();
   if (services.unsubscribeGroup) services.unsubscribeGroup();
   services.unsubscribeGroup = null;
 
@@ -651,11 +738,124 @@ async function signOutUser() {
   }
 
   localStore.session = null;
+  localStore.shareLocation = false;
   saveLocalStore();
   localStorage.removeItem(LAST_GROUP_KEY);
   resetState();
   renderAuthGate();
   els.profileDialog.close();
+}
+
+function toggleLiveLocation() {
+  if (locationSharing) {
+    stopLiveLocation();
+    renderAll();
+    return;
+  }
+
+  startLiveLocation();
+}
+
+function startLiveLocation(options = {}) {
+  if (!navigator.geolocation) {
+    if (!options.quiet) els.authMessage.textContent = "Location is not available in this browser.";
+    return;
+  }
+
+  if (locationSharing) return;
+  setLocationButtonState("starting");
+
+  locationWatchId = navigator.geolocation.watchPosition(
+    handleLivePosition,
+    (error) => handleLiveLocationError(error, options),
+    {
+      enableHighAccuracy: true,
+      maximumAge: 30 * 1000,
+      timeout: 20 * 1000
+    }
+  );
+
+  locationSharing = true;
+  localStore.shareLocation = true;
+  saveLocalStore();
+  renderAll();
+}
+
+function stopLiveLocation() {
+  if (locationWatchId !== null) {
+    navigator.geolocation.clearWatch(locationWatchId);
+  }
+  locationWatchId = null;
+  locationSharing = false;
+  localStore.shareLocation = false;
+  saveLocalStore();
+}
+
+async function handleLivePosition(position) {
+  const user = currentUser();
+  const liveLocation = normalizeLiveLocation({
+    lat: position.coords.latitude,
+    lon: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    x: geoX(position.coords.longitude),
+    y: geoY(position.coords.latitude),
+    updatedAt: new Date(position.timestamp || Date.now()).toISOString(),
+    online: navigator.onLine,
+    source: "gps"
+  });
+
+  user.liveLocation = liveLocation;
+  state.user = user;
+  renderAll();
+
+  const now = Date.now();
+  if (now - lastLocationPersistedAt < LIVE_LOCATION_THROTTLE_MS) return;
+  lastLocationPersistedAt = now;
+
+  try {
+    await persistCurrentMember({ updateProfile: false });
+  } catch {
+    localStore.pendingLiveLocation = liveLocation;
+    saveLocalStore();
+  }
+}
+
+function handleLiveLocationError(error, options = {}) {
+  if (!options.quiet) {
+    const denied = error?.code === error?.PERMISSION_DENIED;
+    const message = denied ? "Location sharing is off." : "Live location paused. Schedule fallback is active.";
+    els.authMessage.textContent = message;
+  }
+  stopLiveLocation();
+  renderAll();
+}
+
+function renderLocationState() {
+  const selected = selectedFriend();
+  const live = liveLocationForFriend(selected);
+  const ownLive = liveLocationForFriend(currentUser());
+  const selectedIsSelf = selected.id === state.user?.id;
+
+  els.locationButton.classList.toggle("active", locationSharing);
+  els.locationButton.classList.toggle("fresh", Boolean(ownLive));
+  els.locationButton.classList.toggle("starting", locationSharing && !ownLive);
+  els.locationButton.setAttribute("aria-pressed", String(locationSharing));
+
+  if (!navigator.onLine) {
+    els.locationStatus.textContent = "Offline fallback";
+  } else if (selectedIsSelf && locationSharing && ownLive) {
+    els.locationStatus.textContent = `Live GPS ${relativeAge(ownLive.updatedAt)}`;
+  } else if (live) {
+    els.locationStatus.textContent = `Friend live ${relativeAge(live.updatedAt)}`;
+  } else if (selectedIsSelf && locationSharing) {
+    els.locationStatus.textContent = "Waiting for GPS";
+  } else {
+    els.locationStatus.textContent = "Schedule fallback";
+  }
+}
+
+function setLocationButtonState(stateName) {
+  els.locationButton.classList.toggle("starting", stateName === "starting");
 }
 
 async function copyGroupCode() {
@@ -664,17 +864,52 @@ async function copyGroupCode() {
   if (els.profileDialog.open) els.profileMessage.textContent = message;
 }
 
-function setAuthMode(mode) {
-  authMode = mode;
-  const create = mode === "create";
-  els.authSubmitButton.textContent = create ? "Create account" : "Sign in";
-  els.authModeButton.textContent = create ? "I already have an account" : "Create a new account";
-  els.authPassword.autocomplete = create ? "new-password" : "current-password";
-}
-
 function setBusy(isBusy) {
   els.authSubmitButton.disabled = isBusy;
-  els.authSubmitButton.textContent = isBusy ? "Opening the gate..." : (authMode === "create" ? "Create account" : "Sign in");
+  els.authSubmitButton.textContent = isBusy ? "Opening the gate..." : (pendingVerification ? "Verify and enter" : "Enter app");
+}
+
+function setGroupMode(mode) {
+  groupMode = mode;
+  const creating = mode === "create";
+  els.createGroupButton.classList.toggle("active", creating);
+  els.joinGroupButton.classList.toggle("active", !creating);
+  els.authGroupCode.readOnly = creating;
+  els.authGroupCode.placeholder = creating ? "Auto-generated" : "Friend's group code";
+  els.regenerateGroupButton.hidden = !creating;
+  if (creating || !els.authGroupCode.value.trim()) {
+    els.authGroupCode.value = creating ? generateGroupCode() : "";
+  }
+  clearVerificationStep();
+}
+
+function clearVerificationStep() {
+  pendingVerification = null;
+  if (els.verificationPanel) els.verificationPanel.hidden = true;
+  if (els.authVerificationCode) els.authVerificationCode.value = "";
+  if (els.authSubmitButton) els.authSubmitButton.textContent = "Enter app";
+}
+
+async function resendVerificationCode() {
+  if (!pendingVerification) return;
+  setBusy(true);
+  try {
+    if (typeof services.base44.auth.resendOtp === "function") {
+      await services.base44.auth.resendOtp(pendingVerification.profile.email);
+    } else {
+      await services.base44.auth.register({
+        email: pendingVerification.profile.email,
+        password: pendingVerification.password,
+        referral_code: null,
+        turnstile_token: null
+      });
+    }
+    els.authMessage.textContent = "New verification code sent.";
+  } catch (error) {
+    els.authMessage.textContent = humanAuthError(error);
+  } finally {
+    setBusy(false);
+  }
 }
 
 function renderAuthGate() {
@@ -683,13 +918,18 @@ function renderAuthGate() {
   els.appShell.hidden = !signedIn;
 
   if (!signedIn) {
-    els.cloudBadge.textContent = services.cloud ? "Firebase secure sync" : "Local demo store";
+    els.cloudBadge.textContent = services.provider === "base44"
+      ? "Base44 secure sync"
+      : (services.cloud ? "Firebase secure sync" : "Local demo store");
     return;
   }
 
   selectedFriendId = state.friends.some((friend) => friend.id === selectedFriendId)
     ? selectedFriendId
     : state.user.id;
+  if (localStore.shareLocation && !locationSharing) {
+    startLiveLocation({ quiet: true });
+  }
   renderAll();
 }
 
@@ -709,6 +949,7 @@ function renderAll() {
   els.groupCodeLabel.textContent = state.groupCode;
   els.friendGroupCode.textContent = state.groupCode;
   els.profileGroupCode.textContent = state.groupCode;
+  renderLocationState();
 
   [...els.dayButtons.children].forEach((button, index) => {
     button.classList.toggle("active", Object.keys(days)[index] === state.selectedDay);
@@ -783,11 +1024,12 @@ function renderPins() {
 
   state.friends.forEach((friend) => {
     const stage = stageForFriend(friend);
-    const position = offsetPosition(friend, stage, placements);
+    const position = positionForFriend(friend, stage, placements);
     const pin = document.createElement("button");
     pin.type = "button";
     pin.className = "friend-pin";
     pin.classList.toggle("selected", friend.id === selectedFriendId);
+    pin.classList.toggle("live", Boolean(liveLocationForFriend(friend)));
     pin.style.left = `${position.x * 100}%`;
     pin.style.top = `${position.y * 100}%`;
     pin.style.setProperty("--friend-color", friend.color || "#53e2ff");
@@ -1102,6 +1344,9 @@ function cleanArtist(value) {
 }
 
 function stageForFriend(friend) {
+  const live = liveLocationForFriend(friend);
+  if (live?.stageId) return stageById(live.stageId);
+
   const active = activeEvent(friend);
   if (active) return stageById(active.stageId);
 
@@ -1125,6 +1370,9 @@ function displayEvent(friend) {
 }
 
 function statusText(friend) {
+  const live = liveLocationForFriend(friend);
+  if (live) return `Live GPS - ${stageById(live.stageId).name}`;
+
   const active = activeEvent(friend);
   if (active) return `${active.artist} - ${stageById(active.stageId).name}`;
 
@@ -1156,6 +1404,77 @@ function offsetPosition(friend, stage, groups) {
   };
 }
 
+function positionForFriend(friend, stage, groups) {
+  const live = liveLocationForFriend(friend);
+  if (live) {
+    return {
+      x: clamp(live.x, 0.04, 0.96),
+      y: clamp(live.y, 0.06, 0.96)
+    };
+  }
+
+  return offsetPosition(friend, stage, groups);
+}
+
+function liveLocationForFriend(friend) {
+  const live = normalizeLiveLocation(friend?.liveLocation);
+  if (!live) return null;
+  if (!navigator.onLine) return null;
+  const updatedAt = Date.parse(live.updatedAt);
+  if (!Number.isFinite(updatedAt)) return null;
+  if (Date.now() - updatedAt > LIVE_LOCATION_MAX_AGE_MS) return null;
+  return live;
+}
+
+function normalizeLiveLocation(value) {
+  if (!value || typeof value !== "object") return null;
+  const lat = Number(value.lat);
+  const lon = Number(value.lon);
+  const x = Number(value.x ?? geoX(lon));
+  const y = Number(value.y ?? geoY(lat));
+  const updatedAt = value.updatedAt || value.timestamp || "";
+
+  if (![lat, lon, x, y].every(Number.isFinite) || !updatedAt) return null;
+
+  return {
+    lat,
+    lon,
+    x: clamp(x, 0, 1),
+    y: clamp(y, 0, 1),
+    accuracy: Number.isFinite(Number(value.accuracy)) ? Number(value.accuracy) : null,
+    updatedAt,
+    online: value.online !== false,
+    source: value.source || "gps",
+    stageId: nearestStageId(x, y)
+  };
+}
+
+function nearestStageId(x, y) {
+  return stages
+    .filter((stage) => stage.id !== "speedway-entry")
+    .map((stage) => ({
+      id: stage.id,
+      distance: Math.hypot(stage.x - x, stage.y - y)
+    }))
+    .sort((a, b) => a.distance - b.distance)[0]?.id || "speedway-entry";
+}
+
+function geoX(lon) {
+  return clamp((lon - EDC_GEO_BOUNDS.west) / (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west), 0, 1);
+}
+
+function geoY(lat) {
+  return clamp((EDC_GEO_BOUNDS.north - lat) / (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south), 0, 1);
+}
+
+function relativeAge(updatedAt) {
+  const ageMs = Math.max(0, Date.now() - Date.parse(updatedAt));
+  const mins = Math.round(ageMs / 60000);
+  if (mins < 1) return "now";
+  if (mins === 1) return "1 min ago";
+  return `${mins} min ago`;
+}
+
 function selectedFriend() {
   return state.friends.find((friend) => friend.id === selectedFriendId) || currentUser();
 }
@@ -1167,7 +1486,8 @@ function currentUser() {
     email: "",
     photo: "",
     color: "#53e2ff",
-    schedule: []
+    schedule: [],
+    liveLocation: null
   };
 }
 
@@ -1197,7 +1517,8 @@ function normalizeMember(member) {
     photo: member.photo || "",
     color: member.color || randomColor(),
     groupCode: member.groupCode || state.groupCode || "",
-    schedule: Array.isArray(member.schedule) ? member.schedule.map(normalizeEvent).filter(Boolean) : []
+    schedule: Array.isArray(member.schedule) ? member.schedule.map(normalizeEvent).filter(Boolean) : [],
+    liveLocation: normalizeLiveLocation(member.liveLocation)
   };
 }
 
@@ -1211,6 +1532,7 @@ function sanitizeMember(member) {
     color: normalized.color,
     groupCode: normalized.groupCode,
     schedule: normalized.schedule,
+    liveLocation: normalized.liveLocation,
     updatedAt: member.updatedAt
   };
 }
@@ -1224,7 +1546,8 @@ function profileFromBase44User(account, groupCode) {
     photo: account.profilePhoto || "",
     color: account.pinColor || randomColor(),
     groupCode,
-    schedule: []
+    schedule: [],
+    liveLocation: null
   };
 }
 
@@ -1283,7 +1606,9 @@ function loadLocalStore() {
     session: null,
     groups: {},
     selectedDay: "friday",
-    selectedMinute: days.friday.start
+    selectedMinute: days.friday.start,
+    shareLocation: false,
+    pendingLiveLocation: null
   };
 }
 
@@ -1387,6 +1712,46 @@ function normalizeGroupCode(value) {
     .slice(0, 24);
 }
 
+function generateGroupCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(6);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  const fallback = Date.now().toString(36).toUpperCase();
+  const parts = [...bytes].map((byte, index) => alphabet[byte % alphabet.length] || fallback[index % fallback.length]);
+  return `EDC-${parts.slice(0, 3).join("")}-${parts.slice(3).join("")}`;
+}
+
+function validEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+async function emailOnlyPassword(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  const input = `${EMAIL_ONLY_SECRET}:${normalized}`;
+
+  if (globalThis.crypto?.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+    const bytes = [...new Uint8Array(digest)];
+    const token = btoa(String.fromCharCode(...bytes))
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replaceAll("=", "")
+      .slice(0, 32);
+    return `FG-${token}-2026!`;
+  }
+
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
+  }
+  return `FG-${hash.toString(36)}-${normalized.length}-2026!`;
+}
+
+function alreadyExistsError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("already") || message.includes("exists") || message.includes("registered");
+}
+
 function initials(name) {
   const letters = cleanName(name)
     .split(/\s+/)
@@ -1421,11 +1786,11 @@ function cryptoId() {
 
 function humanAuthError(error) {
   const code = error.code || "";
-  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "Email or password did not match.";
+  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "That email has an older account. Try another email for email-only entry.";
   if (code.includes("weak-password")) return "Use a password with at least 6 characters.";
   if (code.includes("invalid-email")) return "Enter a valid email address.";
   if (code.includes("network")) return "Network issue. Try again when your connection is steady.";
-  if (String(error.message || "").toLowerCase().includes("unauthorized")) return "Email or password did not match.";
+  if (String(error.message || "").toLowerCase().includes("unauthorized")) return "That email has an older account. Try another email for email-only entry.";
   return error.message || String(error);
 }
 

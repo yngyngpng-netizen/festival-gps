@@ -64,6 +64,50 @@
         },
         "required": ["artist", "stageId", "day", "start", "end"]
       }
+    },
+    "liveLocation": {
+      "type": "object",
+      "description": "Fresh phone GPS location projected onto the EDC map. Schedule is used when this is missing or stale.",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lon": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "accuracy": {
+          "type": "number",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "stageId": {
+          "type": "string",
+          "maxLength": 40
+        }
+      }
     }
   },
   "required": ["userId", "groupCode", "name"],

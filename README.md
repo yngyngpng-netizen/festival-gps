@@ -20,14 +20,16 @@ The web app includes:
 - PWA manifest and service worker.
 - EDC map with fallback artwork.
 - Timeline-driven friend pins.
-- Email/password account flow.
+- Email-only entry flow backed by app-managed Base44 auth.
+- Email verification-code step for first-time users.
 - Profile photo upload with in-browser image compression.
-- Group-code entry so friends in the same group share pins and routes.
+- Create-group and join-code flow so each crew can start with a unique group code.
 - Schedule picture OCR through Tesseract.js for Friday, Saturday, and Sunday schedules.
+- Optional live phone location sharing with schedule fallback when GPS is unavailable or the phone is offline.
 - Base44 Auth + Entities sync when `FestivalGPSWeb/base44-config.js` has an app id.
 - Firebase Auth + Firestore integration with `localStorage` fallback for local demos.
 
-Base44 resources live in `base44/`: email/password auth is enabled in `base44/auth/config.jsonc`, and group sharing is stored in the `CrewMember` entity. The published GitHub Pages app runs in local demo mode until `FestivalGPSWeb/base44-config.js` or `FestivalGPSWeb/firebase-config.js` is filled.
+Base44 resources live in `base44/`: email/password auth is enabled in `base44/auth/config.jsonc` for the backend, while the UI derives an app-managed credential so friends only type an email. Group sharing, parsed schedules, and live location snapshots are stored in the `CrewMember` entity. The published GitHub Pages app runs in local demo mode until `FestivalGPSWeb/base44-config.js` or `FestivalGPSWeb/firebase-config.js` is filled.
 
 ## Open
 
