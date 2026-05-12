@@ -3,7 +3,6 @@ import { firebaseConfig, firebaseIsConfigured } from "./firebase-config.js";
 
 const STORAGE_KEY = "festival-gps-pwa-v2";
 const LAST_GROUP_KEY = "festival-gps-last-group";
-const MAP_URL = "https://d3vhc53cl8e8km.cloudfront.net/hello-staging/wp-content/uploads/sites/21/2026/05/08131244/edclv_2026_de_festival_map_1080x1350_r05_blurred.jpg";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const EMAIL_ONLY_SECRET = "festival-gps-edc-2026-email-only-v1";
 const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
@@ -22,18 +21,18 @@ const days = {
 };
 
 const stages = [
-  { id: "kinetic-field", name: "Kinetic Field", x: 0.48, y: 0.68, color: "#ff4fd8" },
-  { id: "cosmic-meadow", name: "Cosmic Meadow", x: 0.27, y: 0.23, color: "#53e2ff" },
-  { id: "circuit-grounds", name: "Circuit Grounds", x: 0.69, y: 0.27, color: "#a5ff5f" },
-  { id: "neon-garden", name: "Neon Garden", x: 0.70, y: 0.48, color: "#ffe45f" },
-  { id: "basspod", name: "Basspod", x: 0.30, y: 0.47, color: "#ff6b6b" },
-  { id: "wasteland", name: "Wasteland", x: 0.25, y: 0.66, color: "#ff9f43" },
-  { id: "quantum-valley", name: "Quantum Valley", x: 0.73, y: 0.68, color: "#8e7cff" },
-  { id: "stereo-bloom", name: "Stereo Bloom", x: 0.52, y: 0.47, color: "#4dffb8" },
-  { id: "bionic-jungle", name: "Bionic Jungle", x: 0.60, y: 0.58, color: "#f86fff" },
-  { id: "art-cars", name: "Art Cars", x: 0.49, y: 0.82, color: "#f8f4a6" },
-  { id: "downtown-edc", name: "Downtown EDC", x: 0.41, y: 0.55, color: "#7de2d1" },
-  { id: "speedway-entry", name: "Speedway Entry", x: 0.50, y: 0.92, color: "#f7f7ff" }
+  { id: "kinetic-field", name: "Kinetic Field", x: 0.65, y: 0.16, color: "#ff4fd8" },
+  { id: "cosmic-meadow", name: "Cosmic Meadow", x: 0.21, y: 0.48, color: "#53e2ff" },
+  { id: "circuit-grounds", name: "Circuit Grounds", x: 0.80, y: 0.84, color: "#a5ff5f" },
+  { id: "neon-garden", name: "Neon Garden", x: 0.79, y: 0.52, color: "#ffe45f" },
+  { id: "basspod", name: "Basspod", x: 0.57, y: 0.84, color: "#ff6b6b" },
+  { id: "wasteland", name: "Wasteland", x: 0.21, y: 0.80, color: "#ff9f43" },
+  { id: "quantum-valley", name: "Quantum Valley", x: 0.78, y: 0.30, color: "#8e7cff" },
+  { id: "stereo-bloom", name: "Stereo Bloom", x: 0.38, y: 0.36, color: "#4dffb8" },
+  { id: "bionic-jungle", name: "Bionic Jungle", x: 0.22, y: 0.31, color: "#f86fff" },
+  { id: "art-cars", name: "Art Cars", x: 0.37, y: 0.55, color: "#f8f4a6" },
+  { id: "downtown-edc", name: "Downtown EDC", x: 0.48, y: 0.58, color: "#7de2d1" },
+  { id: "speedway-entry", name: "Speedway Entry", x: 0.07, y: 0.48, color: "#f7f7ff" }
 ];
 
 const aliases = new Map([
@@ -97,7 +96,6 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   bindElements();
   registerServiceWorker();
-  setMapImage();
   renderDayButtons();
   renderStages();
   bindEvents();
@@ -1655,10 +1653,6 @@ function resetState() {
     friends: []
   };
   selectedFriendId = "";
-}
-
-function setMapImage() {
-  document.querySelector(".map-photo").style.backgroundImage = `linear-gradient(rgba(6, 7, 17, 0.10), rgba(6, 7, 17, 0.30)), url("${MAP_URL}")`;
 }
 
 async function imageFileToDataUrl(file) {

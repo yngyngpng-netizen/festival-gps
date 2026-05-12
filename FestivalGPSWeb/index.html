@@ -11,9 +11,9 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=20260512-3">
+    <link rel="stylesheet" href="styles.css?v=20260512-5">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260512-3"></script>
+    <script type="module" src="app.js?v=20260512-5"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Create Festival GPS account">
@@ -112,13 +112,10 @@
 
       <main class="map-shell">
         <section id="map" class="map" aria-label="EDC Las Vegas 2026 map">
-          <div class="map-photo"></div>
-          <div class="fallback-map" aria-hidden="true">
-            <div class="speedway outer"></div>
-            <div class="speedway inner"></div>
-            <div class="path vertical"></div>
-            <div class="path cross"></div>
+          <div class="official-map" aria-hidden="true">
+            <img src="https://d3vhc53cl8e8km.cloudfront.net/hello-staging/wp-content/uploads/sites/21/2026/05/08131244/edclv_2026_de_festival_map_1080x1350_r05_blurred.jpg" alt="">
           </div>
+          <div class="map-clarity" aria-hidden="true"></div>
           <svg id="routeLayer" class="route-layer" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
           <div id="stageLayer" class="stage-layer"></div>
           <div id="pinLayer" class="pin-layer"></div>
