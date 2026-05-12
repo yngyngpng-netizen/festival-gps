@@ -21,6 +21,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;
@@ -42,10 +46,6 @@ textarea {
 
 button {
   cursor: pointer;
-}
-
-[hidden] {
-  display: none !important;
 }
 
 .onboarding {
@@ -235,6 +235,14 @@ label {
   color: white;
 }
 
+.group-hint {
+  margin: 0;
+  color: rgba(247, 247, 255, 0.72);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .group-code-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;
@@ -261,10 +269,20 @@ label {
 .verification-panel {
   display: grid;
   gap: 8px;
-  padding: 10px;
+  padding: 12px;
   border: 1px solid rgba(173, 255, 104, 0.28);
   border-radius: var(--radius);
-  background: rgba(173, 255, 104, 0.08);
+  background: linear-gradient(135deg, rgba(173, 255, 104, 0.14), rgba(83, 226, 255, 0.10));
+}
+
+.verification-panel.active {
+  box-shadow: 0 0 0 1px rgba(173, 255, 104, 0.22), 0 18px 44px rgba(83, 226, 255, 0.16);
+}
+
+.verification-panel strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.25;
 }
 
 input,

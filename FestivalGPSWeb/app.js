@@ -121,6 +121,7 @@ function bindElements() {
     "authSubmitButton",
     "createGroupButton",
     "joinGroupButton",
+    "groupModeHint",
     "regenerateGroupButton",
     "resendCodeButton",
     "verificationPanel",
@@ -461,17 +462,37 @@ async function authenticateWithBase44(profile, password, groupCode) {
       turnstile_token: null
     });
   } catch (error) {
+    if (requiresVerificationError(error)) {
+      showBase44VerificationStep(profile, password, groupCode);
+      throw new VerificationPendingError();
+    }
     if (!alreadyExistsError(error)) throw error;
-    await loginExistingBase44User(profile, password, groupCode);
+    try {
+      await loginExistingBase44User(profile, password, groupCode);
+    } catch (loginError) {
+      if (requiresVerificationError(loginError)) {
+        showBase44VerificationStep(profile, password, groupCode);
+        throw new VerificationPendingError();
+      }
+      throw loginError;
+    }
     return;
   }
 
+  showBase44VerificationStep(profile, password, groupCode);
+  throw new VerificationPendingError();
+}
+
+function showBase44VerificationStep(profile, password, groupCode) {
   pendingVerification = { profile, password, groupCode };
   els.verificationPanel.hidden = false;
-  els.authVerificationCode.focus();
+  els.verificationPanel.classList.add("active");
   els.authSubmitButton.textContent = "Verify and enter";
   els.authMessage.textContent = "Check your email for the 6-digit code, then enter it here.";
-  throw new VerificationPendingError();
+  requestAnimationFrame(() => {
+    els.verificationPanel.scrollIntoView({ block: "center", behavior: "smooth" });
+    els.authVerificationCode.focus({ preventScroll: true });
+  });
 }
 
 async function loginExistingBase44User(profile, password, groupCode) {
@@ -870,6 +891,7 @@ function setBusy(isBusy) {
 }
 
 function setGroupMode(mode) {
+  const previousMode = groupMode;
   groupMode = mode;
   const creating = mode === "create";
   els.createGroupButton.classList.toggle("active", creating);
@@ -877,8 +899,13 @@ function setGroupMode(mode) {
   els.authGroupCode.readOnly = creating;
   els.authGroupCode.placeholder = creating ? "Auto-generated" : "Friend's group code";
   els.regenerateGroupButton.hidden = !creating;
-  if (creating || !els.authGroupCode.value.trim()) {
-    els.authGroupCode.value = creating ? generateGroupCode() : "";
+  els.groupModeHint.textContent = creating
+    ? "Start a new crew and share this private group code with friends."
+    : "Enter the group code your friend shared with you.";
+  if (creating && (previousMode !== "create" || !els.authGroupCode.value.trim())) {
+    els.authGroupCode.value = generateGroupCode();
+  } else if (!creating) {
+    els.authGroupCode.value = "";
   }
   clearVerificationStep();
 }
@@ -886,6 +913,7 @@ function setGroupMode(mode) {
 function clearVerificationStep() {
   pendingVerification = null;
   if (els.verificationPanel) els.verificationPanel.hidden = true;
+  if (els.verificationPanel) els.verificationPanel.classList.remove("active");
   if (els.authVerificationCode) els.authVerificationCode.value = "";
   if (els.authSubmitButton) els.authSubmitButton.textContent = "Enter app";
 }
@@ -1750,6 +1778,16 @@ async function emailOnlyPassword(email) {
 function alreadyExistsError(error) {
   const message = String(error?.message || error || "").toLowerCase();
   return message.includes("already") || message.includes("exists") || message.includes("registered");
+}
+
+function requiresVerificationError(error) {
+  const message = String(error?.message || error?.data?.message || error?.data?.detail || error || "").toLowerCase();
+  return (
+    message.includes("verify") ||
+    message.includes("verification") ||
+    message.includes("otp") ||
+    (message.includes("code") && message.includes("email"))
+  );
 }
 
 function initials(name) {

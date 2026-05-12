@@ -11,9 +11,9 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/icon.svg">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260512-3">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=20260512-3"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Create Festival GPS account">
@@ -28,7 +28,7 @@
           <span id="cloudBadge">Secure group sync</span>
         </div>
         <h1>Meet your crew under the electric sky.</h1>
-        <p class="auth-copy">Enter with your email, add a profile pin, join a group code, then upload your EDC schedule so everyone in your group can follow the route.</p>
+        <p class="auth-copy">Enter with your email, add a profile pin, then start a group or join your friend's code before uploading your EDC schedule.</p>
 
         <div class="auth-grid">
           <label>
@@ -40,13 +40,14 @@
             <input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required>
           </label>
           <div class="group-entry">
-            <span>Group</span>
+            <span>Are you starting a group or joining one?</span>
             <div class="group-mode" role="group" aria-label="Group mode">
-              <button id="createGroupButton" class="active" type="button">Create group</button>
-              <button id="joinGroupButton" type="button">Join code</button>
+              <button id="createGroupButton" class="active" type="button">Start new group</button>
+              <button id="joinGroupButton" type="button">Join a group</button>
             </div>
+            <p id="groupModeHint" class="group-hint">Festival GPS will generate your private group code.</p>
             <div class="group-code-row">
-              <input id="authGroupCode" type="text" inputmode="text" autocomplete="off" placeholder="EDC-CREW" required>
+              <input id="authGroupCode" type="text" inputmode="text" autocomplete="off" placeholder="Auto-generated" required>
               <button id="regenerateGroupButton" class="icon-mini" type="button" aria-label="Generate new group code">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.45 5.08h-2.16A6 6 0 1 1 12 6a5.95 5.95 0 0 1 4.22 1.78L13 11h8V3l-3.35 3.35Z"/></svg>
               </button>
@@ -55,6 +56,7 @@
         </div>
 
         <div id="verificationPanel" class="verification-panel" hidden>
+          <strong>Check your email</strong>
           <label>
             <span>Email verification code</span>
             <input id="authVerificationCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code">
