@@ -135,7 +135,6 @@ async function init() {
   renderStages();
   bindEvents();
   setGroupMode("create");
-  initAppleMap();
   await initCloud();
   hydrateLocalSession();
   renderAuthGate();
@@ -172,6 +171,7 @@ function bindElements() {
     "locationButton",
     "scheduleButton",
     "dayButtons",
+    "timeSliderWrap",
     "timeRange",
     "timeOutput",
     "startTimeLabel",
@@ -1124,6 +1124,8 @@ function renderAll() {
   els.timeRange.max = day.end;
   els.timeRange.value = state.selectedMinute;
   els.timeOutput.value = formatTime(state.selectedMinute);
+  const progress = (state.selectedMinute - day.start) / (day.end - day.start);
+  els.timeSliderWrap.style.setProperty("--time-progress", `${clamp(progress, 0, 1) * 100}%`);
   els.startTimeLabel.textContent = formatTime(day.start);
   els.endTimeLabel.textContent = formatTime(day.end);
   els.currentContext.textContent = `${day.label} ${day.date} - ${formatTime(state.selectedMinute)}`;
@@ -1205,29 +1207,39 @@ function renderRoutes() {
 }
 
 function renderPins() {
-  els.pinLayer.replaceChildren();
   const placements = stagePlacements();
   const nextPositions = new Map();
+  const activeIds = new Set(state.friends.map((friend) => friend.id));
+
+  [...els.pinLayer.querySelectorAll(".friend-pin")].forEach((pin) => {
+    if (!activeIds.has(pin.dataset.friendId)) pin.remove();
+  });
 
   state.friends.forEach((friend) => {
     const stage = stageForFriend(friend);
     const position = positionForFriend(friend, stage, placements);
     const previous = lastPinPositions.get(friend.id);
     const isMoving = Boolean(previous && Math.hypot(previous.x - position.x, previous.y - position.y) > 0.01);
-    const pin = document.createElement("button");
-    pin.type = "button";
-    pin.className = "friend-pin";
+    let pin = els.pinLayer.querySelector(`[data-friend-id="${cssEscape(friend.id)}"]`);
+    const isNew = !pin;
+
+    if (!pin) {
+      pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "friend-pin";
+      pin.dataset.friendId = friend.id;
+      pin.addEventListener("click", () => {
+        selectedFriendId = friend.id;
+        renderAll();
+      });
+      els.pinLayer.append(pin);
+    }
+
     pin.classList.toggle("selected", friend.id === selectedFriendId);
     pin.classList.toggle("live", Boolean(liveLocationForFriend(friend)));
-    pin.classList.toggle("walking", isMoving);
-    pin.style.left = `${(isMoving ? previous.x : position.x) * 100}%`;
-    pin.style.top = `${(isMoving ? previous.y : position.y) * 100}%`;
     pin.style.setProperty("--friend-color", friend.color || "#53e2ff");
     pin.setAttribute("aria-label", `${friend.name}, ${statusText(friend)}`);
-    pin.addEventListener("click", () => {
-      selectedFriendId = friend.id;
-      renderAll();
-    });
+    pin.replaceChildren();
 
     const name = document.createElement("span");
     name.className = "pin-name";
@@ -1249,13 +1261,19 @@ function renderPins() {
     status.textContent = statusText(friend);
     person.append(avatarElement(friend, "pin-head"), body);
     pin.append(name, person, status);
-    els.pinLayer.append(pin);
 
-    if (isMoving) {
+    if (isNew) {
+      pin.style.left = `${position.x * 100}%`;
+      pin.style.top = `${position.y * 100}%`;
+    } else {
+      pin.classList.toggle("walking", isMoving);
+      if (isMoving) {
+        window.clearTimeout(pin._walkTimer);
+        pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
+      }
       requestAnimationFrame(() => {
         pin.style.left = `${position.x * 100}%`;
         pin.style.top = `${position.y * 100}%`;
-        window.setTimeout(() => pin.classList.remove("walking"), 1300);
       });
     }
 
@@ -1326,9 +1344,8 @@ function renderFriendList() {
 
 function renderSelectedFriendSummary() {
   const selected = selectedFriend();
-  const stage = stageForFriend(selected);
   els.selectedFriendName.textContent = selected.name || "Your crew";
-  els.selectedFriendStage.textContent = `${stage.name} - ${statusText(selected)}`;
+  els.selectedFriendStage.textContent = statusText(selected);
 }
 
 function renderAuthPhotoPreview(photo, name) {
@@ -2385,6 +2402,11 @@ function formatTime(minute) {
 
 function normalize(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function cssEscape(value) {
+  if (globalThis.CSS?.escape) return CSS.escape(String(value));
+  return String(value).replace(/["\\]/g, "\\$&");
 }
 
 function normalizeGroupCode(value) {

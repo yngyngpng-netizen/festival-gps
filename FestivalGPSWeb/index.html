@@ -11,9 +11,9 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=20260512-9">
+    <link rel="stylesheet" href="styles.css?v=20260512-10">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260512-9"></script>
+    <script type="module" src="app.js?v=20260512-10"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Create Festival GPS account">
@@ -150,9 +150,11 @@
         </div>
         <div class="timeline-row">
           <div id="dayButtons" class="segmented"></div>
-          <output id="timeOutput">5:00 PM</output>
         </div>
-        <input id="timeRange" class="time-range" type="range" min="1020" max="1770" step="5" value="1020">
+        <div id="timeSliderWrap" class="time-slider-wrap">
+          <output id="timeOutput">5:00 PM</output>
+          <input id="timeRange" class="time-range" type="range" min="1020" max="1770" step="5" value="1020">
+        </div>
         <div class="timeline-labels">
           <span id="startTimeLabel">5:00 PM</span>
           <span id="endTimeLabel">5:30 AM</span>
