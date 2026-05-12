@@ -1,4 +1,4 @@
-import { BASE44_CONFIG, base44IsConfigured } from "./base44-config.js";
+import { BASE44_CONFIG, MAPKIT_CONFIG, base44IsConfigured } from "./base44-config.js";
 import { firebaseConfig, firebaseIsConfigured } from "./firebase-config.js";
 
 const STORAGE_KEY = "festival-gps-pwa-v2";
@@ -13,6 +13,11 @@ const EDC_GEO_BOUNDS = {
   west: -115.026,
   east: -114.996
 };
+const EDC_CENTER = {
+  lat: (EDC_GEO_BOUNDS.north + EDC_GEO_BOUNDS.south) / 2,
+  lon: (EDC_GEO_BOUNDS.west + EDC_GEO_BOUNDS.east) / 2
+};
+const MAPKIT_JS_URL = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js";
 
 const days = {
   friday: { label: "Friday", short: "Fri", date: "May 15", start: 17 * 60, end: 29 * 60 + 30 },
@@ -95,6 +100,12 @@ let locationWatchId = null;
 let locationSharing = false;
 let lastLocationPersistedAt = 0;
 let lastPinPositions = new Map();
+let mapkitState = {
+  ready: false,
+  loading: false,
+  map: null,
+  lastError: ""
+};
 
 const els = {};
 
@@ -109,6 +120,7 @@ async function init() {
   renderStages();
   bindEvents();
   setGroupMode("create");
+  initAppleMap();
   await initCloud();
   hydrateLocalSession();
   renderAuthGate();
@@ -138,6 +150,8 @@ function bindElements() {
     "syncStatus",
     "groupButton",
     "groupCodeLabel",
+    "map",
+    "appleMapLayer",
     "friendsButton",
     "profileButton",
     "locationButton",
@@ -291,6 +305,124 @@ function bindEvents() {
 
   window.addEventListener("online", renderAll);
   window.addEventListener("offline", renderAll);
+  window.addEventListener("resize", syncMapOverlays);
+}
+
+async function initAppleMap() {
+  if (mapkitState.loading || mapkitState.ready) return;
+
+  const token = await mapkitToken();
+  if (!token) {
+    mapkitState.lastError = "Missing Apple Maps token.";
+    return;
+  }
+
+  mapkitState.loading = true;
+  try {
+    await loadExternalScript(MAPKIT_JS_URL);
+    if (!window.mapkit) throw new Error("MapKit JS did not load.");
+
+    const mapkit = window.mapkit;
+    mapkit.init({
+      authorizationCallback(done) {
+        done(token);
+      },
+      language: MAPKIT_CONFIG.language || "en-US"
+    });
+
+    const center = new mapkit.Coordinate(EDC_CENTER.lat, EDC_CENTER.lon);
+    const span = new mapkit.CoordinateSpan(
+      EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south,
+      EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west
+    );
+    const region = new mapkit.CoordinateRegion(center, span);
+    const mapOptions = {
+      center,
+      region,
+      rotation: -14,
+      cameraDistance: 1450,
+      tintColor: "#007aff",
+      isScrollEnabled: true,
+      isZoomEnabled: true,
+      isRotationEnabled: true,
+      showsMapTypeControl: true,
+      showsZoomControl: false,
+      showsPointsOfInterest: false
+    };
+
+    const mapTypes = mapkit.Map?.MapTypes || {};
+    const colorSchemes = mapkit.Map?.ColorSchemes || {};
+    const featureVisibility = mapkit.FeatureVisibility || {};
+    if (mapTypes.Hybrid) mapOptions.mapType = mapTypes.Hybrid;
+    if (colorSchemes.Light) mapOptions.colorScheme = colorSchemes.Light;
+    if (featureVisibility.Visible) mapOptions.showsCompass = featureVisibility.Visible;
+    if (featureVisibility.Hidden) mapOptions.showsScale = featureVisibility.Hidden;
+
+    mapkitState.map = new mapkit.Map(els.appleMapLayer, mapOptions);
+    mapkitState.ready = true;
+    els.map.classList.add("has-apple-map");
+
+    ["region-change-end", "rotation-end", "scroll-end", "zoom-end"].forEach((eventName) => {
+      mapkitState.map.addEventListener(eventName, syncMapOverlays);
+    });
+
+    requestAnimationFrame(() => {
+      syncMapOverlays();
+      if (state.user) renderAll();
+    });
+  } catch (error) {
+    mapkitState.lastError = error.message || String(error);
+    els.map.classList.remove("has-apple-map");
+  } finally {
+    mapkitState.loading = false;
+  }
+}
+
+async function mapkitToken() {
+  if (MAPKIT_CONFIG.token) return MAPKIT_CONFIG.token;
+  if (MAPKIT_CONFIG.tokenUrl) {
+    try {
+      const response = await fetch(MAPKIT_CONFIG.tokenUrl, { credentials: "include" });
+      const payload = await response.json();
+      return payload?.token || payload?.mapkitToken || "";
+    } catch {
+      return "";
+    }
+  }
+  return globalThis.FESTIVAL_GPS_MAPKIT_TOKEN || localStorage.getItem("festival-gps-mapkit-token") || "";
+}
+
+function loadExternalScript(src) {
+  const existing = document.querySelector(`script[src="${src}"]`);
+  if (existing) {
+    return existing.dataset.loaded === "true"
+      ? Promise.resolve()
+      : new Promise((resolve, reject) => {
+        existing.addEventListener("load", resolve, { once: true });
+        existing.addEventListener("error", reject, { once: true });
+      });
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.crossOrigin = "anonymous";
+    script.defer = true;
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => reject(new Error("Could not load Apple Maps.")), { once: true });
+    document.head.append(script);
+  });
+}
+
+function syncMapOverlays() {
+  renderStages();
+  if (state.user) {
+    renderRoutes();
+    renderPins();
+  }
 }
 
 async function initCloud() {
@@ -1015,10 +1147,11 @@ function renderDayButtons() {
 function renderStages() {
   els.stageLayer.replaceChildren();
   stages.filter((stage) => stage.id !== "speedway-entry").forEach((stage) => {
+    const position = screenPositionForStage(stage);
     const marker = document.createElement("div");
     marker.className = "stage-marker";
-    marker.style.left = `${stage.x * 100}%`;
-    marker.style.top = `${stage.y * 100}%`;
+    marker.style.left = `${position.x * 100}%`;
+    marker.style.top = `${position.y * 100}%`;
     marker.style.setProperty("--stage-color", stage.color);
     marker.style.setProperty("--stage-art", stage.art);
 
@@ -1043,7 +1176,8 @@ function renderRoutes() {
       .sort((a, b) => a.start - b.start)
       .map((item) => stageById(item.stageId))
       .filter(Boolean)
-      .map((stage) => `${Math.round(stage.x * 1000)},${Math.round(stage.y * 1000)}`);
+      .map((stage) => screenPositionForStage(stage))
+      .map((point) => `${Math.round(point.x * 1000)},${Math.round(point.y * 1000)}`);
 
     if (points.length < 2) return;
 
@@ -1230,7 +1364,16 @@ async function recognizeSchedule(file) {
   renderParsedSchedule();
 
   if (!window.Tesseract) {
-    els.ocrStatus.textContent = "OCR did not load. Paste schedule text instead.";
+    els.ocrStatus.textContent = "OCR did not load. Asking Base44 to read the image...";
+    const aiResult = await extractScheduleWithBase44AI(file);
+    if (aiResult?.events?.length) {
+      els.ocrText.value = aiResult.text;
+      parsedEvents = aiResult.events;
+      els.ocrStatus.textContent = `${parsedEvents.length} sets generated.`;
+      renderParsedSchedule();
+    } else {
+      els.ocrStatus.textContent = "Image reading is unavailable. Paste the visible schedule text here.";
+    }
     return;
   }
 
@@ -1260,8 +1403,8 @@ async function recognizeSchedule(file) {
       if (events.length >= 6) break;
     }
 
-    if (best.events.length < 2) {
-      const aiResult = await extractScheduleWithBase44AI(file);
+    if (best.events.length < 6) {
+      const aiResult = await extractScheduleWithBase44AI(file, best.text);
       if (aiResult?.events?.length > best.events.length) best = aiResult;
     }
 
@@ -1327,21 +1470,29 @@ function preprocessScheduleVariant(image, options) {
   return canvas;
 }
 
-async function extractScheduleWithBase44AI(file) {
+async function extractScheduleWithBase44AI(file, ocrText = "") {
   if (services.provider !== "base44" || !services.base44?.integrations?.Core?.InvokeLLM) return null;
 
   try {
     els.ocrStatus.textContent = "Asking Base44 to read the schedule image...";
-    const uploadFile = dataUrlToFile(await imageFileToDataUrl(file), "festival-schedule.jpg");
+    const uploadFile = await imageFileToUpload(file, {
+      filename: "festival-schedule.jpg",
+      maxSize: 2200,
+      quality: 0.94
+    });
     const upload = await services.base44.integrations.Core.UploadFile({ file: uploadFile });
     const fileUrl = upload?.file_url;
     if (!fileUrl) return null;
 
     const result = await services.base44.integrations.Core.InvokeLLM({
       prompt: [
-        "Read this EDC Las Vegas schedule screenshot.",
+        "Read this EDC Las Vegas 2026 schedule screenshot from the Insomniac app.",
+        "Rows usually show artist artwork, artist name, then text like: Friday - 10:00 PM to 11:15 PM - Circuit Grounds.",
         "Return every visible set as structured JSON.",
         "Each set has artist, day, start time, end time, and stage.",
+        `Known stages: ${stages.filter((stage) => stage.id !== "speedway-entry").map((stage) => stage.name).join(", ")}.`,
+        "If OCR text is noisy, prefer the image.",
+        ocrText ? `Noisy OCR text from the same image: ${ocrText.slice(0, 2400)}` : "",
         "Use the exact stage text if visible. Do not invent sets."
       ].join(" "),
       file_urls: [fileUrl],
@@ -1385,16 +1536,18 @@ function eventsFromAiSchedule(result) {
   const rows = Array.isArray(payload?.events) ? payload.events : [];
 
   return dedupeScheduleEvents(rows.map((row) => {
-    const day = dayIn(row.day || "") || "friday";
-    const range = parseTimeRange(`${row.start || ""} to ${row.end || ""}`);
+    const day = dayIn(row.day || row.date || "") || "friday";
+    const startText = row.start || row.startTime || row.startsAt || "";
+    const endText = row.end || row.endTime || row.endsAt || "";
+    const range = parseTimeRange(`${startText} to ${endText}`) || parseTimeRange(row.time || row.timeRange || "");
     if (!range) return null;
     return {
       id: cryptoId(),
-      artist: cleanArtist(row.artist || "Imported Set"),
+      artist: cleanArtist(row.artist || row.artistName || row.name || "Imported Set"),
       day,
       start: range.start,
       end: range.end,
-      stageId: stageIdIn(row.stage || "") || "speedway-entry"
+      stageId: stageIdIn(row.stage || row.stageName || row.location || row.venue || "") || "speedway-entry"
     };
   }).filter(Boolean));
 }
@@ -1411,7 +1564,12 @@ function aiPayload(result) {
 
 function safeJson(value) {
   try {
-    return JSON.parse(value);
+    const cleaned = String(value)
+      .trim()
+      .replace(/^```(?:json)?/i, "")
+      .replace(/```$/i, "")
+      .trim();
+    return JSON.parse(cleaned);
   } catch {
     return null;
   }
@@ -1454,6 +1612,8 @@ function parseSchedule(text, defaultDay) {
   let lastArtist = "";
 
   lines.forEach((line, index) => {
+    if ([...line.matchAll(scheduleRangePattern())].length > 1) return;
+
     const lineDay = dayIn(line);
     if (lineDay) currentDay = lineDay;
 
@@ -1481,10 +1641,70 @@ function parseSchedule(text, defaultDay) {
     lastArtist = "";
   });
 
-  return dedupeScheduleEvents(output).sort((a, b) => {
+  const rangeEvents = parseScheduleByRanges(normalizedText, defaultDay);
+  return dedupeScheduleEvents(mergeScheduleEvents(output, rangeEvents)).sort((a, b) => {
     if (a.day === b.day) return a.start - b.start;
     return Object.keys(days).indexOf(a.day) - Object.keys(days).indexOf(b.day);
   });
+}
+
+function mergeScheduleEvents(primary, fallback) {
+  const merged = [...primary];
+  fallback.forEach((event) => {
+    const duplicateSlot = merged.some((item) => (
+      item.day === event.day &&
+      item.start === event.start &&
+      item.end === event.end &&
+      item.stageId === event.stageId
+    ));
+    if (!duplicateSlot) merged.push(event);
+  });
+  return merged;
+}
+
+function parseScheduleByRanges(text, defaultDay) {
+  const normalizedText = normalizeScheduleText(text);
+  const rangePattern = scheduleRangePattern();
+  const matches = [...normalizedText.matchAll(rangePattern)];
+  if (!matches.length) return [];
+
+  return matches.map((match, index) => {
+    const range = parseTimeRange(match[0]);
+    if (!range) return null;
+
+    const previousEnd = index > 0 ? matches[index - 1].index + matches[index - 1][0].length : 0;
+    const nextStart = index < matches.length - 1 ? matches[index + 1].index : normalizedText.length;
+    const before = normalizedText.slice(Math.max(previousEnd, match.index - 160), match.index);
+    const after = normalizedText.slice(match.index + match[0].length, Math.min(nextStart, match.index + match[0].length + 180));
+    const windowText = `${before} ${match[0]} ${after}`;
+    const day = dayIn(windowText) || dayIn(normalizedText.slice(0, match.index)) || defaultDay;
+    const stageId = stageIdIn(after) || stageIdIn(windowText) || "speedway-entry";
+    const artist = artistBeforeRange(before) || artistName(windowText, before, after, match[0]);
+
+    return {
+      id: cryptoId(),
+      artist,
+      stageId,
+      day,
+      start: range.start,
+      end: range.end
+    };
+  }).filter(Boolean);
+}
+
+function scheduleRangePattern() {
+  return /\b\d{1,2}(?::\d{2})?\s*(?:AM|PM|A\.M\.|P\.M\.)?\s*(?:-|–|—|to|until|thru|through)?\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM|A\.M\.|P\.M\.)\b/gi;
+}
+
+function artistBeforeRange(value) {
+  const lines = value
+    .split(/\n| - /)
+    .map(cleanArtist)
+    .map((line) => line.replace(/\b\d{1,2}(?::\d{2})?\s*(?:AM|PM)?\b/gi, " "))
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((line) => !dayIn(line) && !stageIdIn(line) && !looksLikeScheduleChrome(line));
+  return lines.at(-1) || "";
 }
 
 function normalizeScheduleText(text) {
@@ -1496,6 +1716,8 @@ function normalizeScheduleText(text) {
     .replace(/(\d)[.;](\d{2})/g, "$1:$2")
     .replace(/\b([Il])(?=:\d{2})/g, "1")
     .replace(/\bO(?=:\d{2})/g, "0")
+    .replace(/\b(AM|PM)(?=to|-|–|—)/gi, "$1 ")
+    .replace(/(\d)(AM|PM)\b/gi, "$1 $2")
     .replace(/\bt0\b/gi, "to")
     .replace(/[|]/g, " ")
     .replace(/[“”]/g, "\"")
@@ -1558,7 +1780,7 @@ function dedupeScheduleEvents(events) {
 }
 
 function parseTimeRange(line) {
-  const rangePattern = /\b(\d{1,2})(?::(\d{2}))?\s*(AM|PM|A\.M\.|P\.M\.)?\s*(?:-|–|—|to|until|thru|through)\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM|A\.M\.|P\.M\.)\b/i;
+  const rangePattern = /\b(\d{1,2})(?::(\d{2}))?\s*(AM|PM|A\.M\.|P\.M\.)?\s*(?:-|–|—|to|until|thru|through)?\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM|A\.M\.|P\.M\.)\b/i;
   const rangeMatch = line.match(rangePattern);
 
   if (rangeMatch) {
@@ -1717,28 +1939,60 @@ function stagePlacements() {
 }
 
 function offsetPosition(friend, stage, groups) {
+  const base = screenPositionForStage(stage);
   const group = groups.get(stage.id) || [];
-  if (group.length <= 1) return { x: stage.x, y: stage.y };
+  if (group.length <= 1) return base;
 
   const index = group.indexOf(friend.id);
   const angle = (index / group.length) * Math.PI * 2;
   const radius = 0.038;
   return {
-    x: clamp(stage.x + Math.cos(angle) * radius, 0.06, 0.94),
-    y: clamp(stage.y + Math.sin(angle) * radius, 0.08, 0.94)
+    x: clamp(base.x + Math.cos(angle) * radius, 0.06, 0.94),
+    y: clamp(base.y + Math.sin(angle) * radius, 0.08, 0.94)
   };
 }
 
 function positionForFriend(friend, stage, groups) {
   const live = liveLocationForFriend(friend);
   if (live) {
-    return {
-      x: clamp(live.x, 0.04, 0.96),
-      y: clamp(live.y, 0.06, 0.96)
-    };
+    return screenPositionForLiveLocation(live);
   }
 
   return offsetPosition(friend, stage, groups);
+}
+
+function screenPositionForStage(stage) {
+  return screenPositionForCoordinate(coordinateForNormalized(stage.x, stage.y)) || { x: stage.x, y: stage.y };
+}
+
+function screenPositionForLiveLocation(live) {
+  return screenPositionForCoordinate({ lat: live.lat, lon: live.lon }) || {
+    x: clamp(live.x, 0.04, 0.96),
+    y: clamp(live.y, 0.06, 0.96)
+  };
+}
+
+function screenPositionForCoordinate(coordinate) {
+  if (!mapkitState.ready || !mapkitState.map || !window.mapkit || !els.map) return null;
+  try {
+    const point = mapkitState.map.convertCoordinateToPointOnPage(
+      new window.mapkit.Coordinate(coordinate.lat, coordinate.lon)
+    );
+    const rect = els.map.getBoundingClientRect();
+    const x = (point.x - rect.left) / rect.width;
+    const y = (point.y - rect.top) / rect.height;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x: clamp(x, -0.15, 1.15), y: clamp(y, -0.15, 1.15) };
+  } catch {
+    return null;
+  }
+}
+
+function coordinateForNormalized(x, y) {
+  return {
+    lat: EDC_GEO_BOUNDS.north - clamp(y, 0, 1) * (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south),
+    lon: EDC_GEO_BOUNDS.west + clamp(x, 0, 1) * (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west)
+  };
 }
 
 function liveLocationForFriend(friend) {
@@ -1966,6 +2220,23 @@ async function imageFileToDataUrl(file) {
   const context = canvas.getContext("2d");
   context.drawImage(image, 0, 0, width, height);
   return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+async function imageFileToUpload(file, options = {}) {
+  const image = await loadImage(file);
+  const maxSize = options.maxSize || 1800;
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#050510";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  const dataUrl = canvas.toDataURL("image/jpeg", options.quality || 0.9);
+  return dataUrlToFile(dataUrl, options.filename || file.name || "upload.jpg");
 }
 
 function dataUrlToFile(dataUrl, filename) {

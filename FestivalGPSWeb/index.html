@@ -11,9 +11,9 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=20260512-7">
+    <link rel="stylesheet" href="styles.css?v=20260512-8">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260512-7"></script>
+    <script type="module" src="app.js?v=20260512-8"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Create Festival GPS account">
@@ -112,6 +112,7 @@
 
       <main class="map-shell">
         <section id="map" class="map" aria-label="EDC Las Vegas 2026 map">
+          <div id="appleMapLayer" class="apple-map-layer" aria-hidden="true"></div>
           <div class="map-scene" aria-hidden="true">
             <div class="map-plane">
               <span class="map-grass g1"></span>

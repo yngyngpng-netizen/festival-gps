@@ -26,6 +26,7 @@ The web app includes:
 - Create-group and join-code flow so each crew can start with a unique group code.
 - Schedule picture OCR through Tesseract.js for Friday, Saturday, and Sunday schedules.
 - Optional live phone location sharing with schedule fallback when GPS is unavailable or the phone is offline.
+- Optional Apple Maps MapKit JS layer for the live festival map. Add a MapKit JS token to `FestivalGPSWeb/base44-config.js` to replace the built-in fallback map with interactive Apple Maps.
 - Base44 Auth + Entities sync when `FestivalGPSWeb/base44-config.js` has an app id.
 - Firebase Auth + Firestore integration with `localStorage` fallback for local demos.
 

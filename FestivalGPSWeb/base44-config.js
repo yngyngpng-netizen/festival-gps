@@ -4,6 +4,12 @@ export const BASE44_CONFIG = {
   sdkUrl: "https://esm.sh/@base44/sdk@0.8.23"
 };
 
+export const MAPKIT_CONFIG = {
+  token: "",
+  tokenUrl: "",
+  language: "en-US"
+};
+
 export function base44IsConfigured() {
   return Boolean(BASE44_CONFIG.appId);
 }

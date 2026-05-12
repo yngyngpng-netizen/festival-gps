@@ -560,12 +560,37 @@ textarea {
 }
 
 .map-scene,
+.apple-map-layer,
 .map-glass,
 .route-layer,
 .stage-layer,
 .pin-layer {
   position: absolute;
   inset: 0;
+}
+
+.apple-map-layer {
+  z-index: 1;
+  overflow: hidden;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+}
+
+.map.has-apple-map .apple-map-layer {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.map.has-apple-map .map-scene {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.apple-map-layer > * {
+  width: 100%;
+  height: 100%;
 }
 
 .map-scene {
