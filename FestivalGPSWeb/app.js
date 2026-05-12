@@ -130,6 +130,7 @@ let lastPinPositions = new Map();
 let timelineClockId = null;
 let timelineFollowsClock = true;
 let lastLocationProblem = "";
+let topFeedbackTimer = null;
 let mapkitState = {
   ready: false,
   loading: false,
@@ -176,14 +177,10 @@ function bindElements() {
     "authMessage",
     "cloudBadge",
     "currentContext",
-    "syncStatus",
-    "groupButton",
-    "groupCodeLabel",
+    "copyCodeButton",
+    "crewProfileButton",
     "map",
     "appleMapLayer",
-    "friendsButton",
-    "profileButton",
-    "locationButton",
     "scheduleButton",
     "dayButtons",
     "timeSliderWrap",
@@ -211,6 +208,13 @@ function bindElements() {
     "saveProfileButton",
     "signOutButton",
     "profileMessage",
+    "profileFriendList",
+    "friendDetailDialog",
+    "friendDetailName",
+    "friendDetailAvatar",
+    "friendDetailNow",
+    "friendDetailSource",
+    "friendDetailSchedule",
     "scheduleDialog",
     "scheduleDay",
     "scheduleImage",
@@ -246,26 +250,8 @@ function bindEvents() {
     renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value);
   });
 
-  els.friendsButton.addEventListener("click", () => {
-    renderFriendList();
-    openDialog(els.friendsDialog);
-  });
-  els.groupButton.addEventListener("click", () => {
-    renderFriendList();
-    openDialog(els.friendsDialog);
-  });
-
-  els.profileButton.addEventListener("click", () => {
-    const user = currentUser();
-    els.profileName.value = user.name || "";
-    els.profileGroupCode.textContent = state.groupCode || "NO GROUP";
-    els.profileMessage.textContent = "";
-    pendingProfilePhoto = "";
-    renderProfilePreview(user);
-    openDialog(els.profileDialog);
-  });
-
-  els.locationButton.addEventListener("click", toggleLiveLocation);
+  els.copyCodeButton.addEventListener("click", copyGroupCode);
+  els.crewProfileButton.addEventListener("click", openProfileSheet);
 
   els.scheduleButton.addEventListener("click", () => {
     els.scheduleDay.value = state.selectedDay;
@@ -809,7 +795,6 @@ async function refreshBase44Group(groupCode) {
     if (!selectedFriendId && state.user) selectedFriendId = state.user.id;
     renderAuthGate();
   } catch (error) {
-    els.syncStatus.textContent = "sync error";
     els.authMessage.textContent = error.message || String(error);
   }
 }
@@ -830,7 +815,6 @@ function subscribeToGroup(groupCode) {
       renderAuthGate();
     },
     (error) => {
-      els.syncStatus.textContent = "sync error";
       els.authMessage.textContent = error.message || String(error);
     }
   );
@@ -1062,24 +1046,45 @@ async function clearOwnLiveLocation(options = {}) {
 
 function renderLocationState() {
   const selected = selectedFriend();
-  const live = liveLocationForFriend(selected);
-  const ownLive = liveLocationForFriend(currentUser());
-
-  els.locationButton.classList.toggle("active", locationSharing);
-  els.locationButton.classList.toggle("fresh", Boolean(ownLive));
-  els.locationButton.classList.toggle("starting", locationSharing && !ownLive);
-  els.locationButton.setAttribute("aria-pressed", String(locationSharing));
+  if (els.locationButton) {
+    const ownLive = liveLocationForFriend(currentUser());
+    els.locationButton.classList.toggle("active", locationSharing);
+    els.locationButton.classList.toggle("fresh", Boolean(ownLive));
+    els.locationButton.classList.toggle("starting", locationSharing && !ownLive);
+    els.locationButton.setAttribute("aria-pressed", String(locationSharing));
+  }
   els.locationStatus.textContent = statusText(selected);
 }
 
 function setLocationButtonState(stateName) {
-  els.locationButton.classList.toggle("starting", stateName === "starting");
+  els.locationButton?.classList.toggle("starting", stateName === "starting");
 }
 
 async function copyGroupCode() {
   const copied = await copyText(state.groupCode);
   const message = copied ? "Group code copied." : state.groupCode;
-  if (els.profileDialog.open) els.profileMessage.textContent = message;
+  if (els.profileDialog.open) {
+    els.profileMessage.textContent = message;
+  } else {
+    showTopFeedback(message);
+  }
+}
+
+function showTopFeedback(message) {
+  window.clearTimeout(topFeedbackTimer);
+  els.currentContext.textContent = message;
+  topFeedbackTimer = window.setTimeout(() => renderAll(), 1800);
+}
+
+function openProfileSheet() {
+  const user = currentUser();
+  els.profileName.value = user.name || "";
+  els.profileGroupCode.textContent = state.groupCode || "NO GROUP";
+  els.profileMessage.textContent = "";
+  pendingProfilePhoto = "";
+  renderProfilePreview(user);
+  renderFriendList(els.profileFriendList, { closeDialog: null });
+  openDialog(els.profileDialog);
 }
 
 function setBusy(isBusy) {
@@ -1175,8 +1180,6 @@ function renderAll() {
   els.startTimeLabel.textContent = formatTime(day.start);
   els.endTimeLabel.textContent = formatTime(day.end);
   els.currentContext.textContent = `${day.label} ${day.date} - ${formatTime(state.selectedMinute)}`;
-  els.syncStatus.textContent = services.provider === "base44" ? "Base44 live" : (services.cloud ? "live sync" : "local demo");
-  els.groupCodeLabel.textContent = state.groupCode;
   els.friendGroupCode.textContent = state.groupCode;
   els.profileGroupCode.textContent = state.groupCode;
   renderLocationState();
@@ -1189,6 +1192,8 @@ function renderAll() {
   renderPins();
   renderFriendStrip();
   renderSelectedFriendSummary();
+  if (els.profileDialog.open) renderFriendList(els.profileFriendList, { closeDialog: null });
+  if (els.friendDetailDialog.open) renderFriendDetail();
 }
 
 function renderDayButtons() {
@@ -1315,6 +1320,8 @@ function renderPins() {
       pin.addEventListener("click", () => {
         selectedFriendId = friend.id;
         renderAll();
+        renderFriendDetail(friend);
+        openDialog(els.friendDetailDialog);
       });
       els.pinLayer.append(pin);
     }
@@ -1329,22 +1336,7 @@ function renderPins() {
     name.className = "pin-name";
     name.textContent = friend.name || "Friend";
 
-    const person = document.createElement("span");
-    person.className = "pin-person";
-
-    const body = document.createElement("span");
-    body.className = "pin-body";
-    ["torso", "arm left", "arm right", "leg left", "leg right"].forEach((part) => {
-      const limb = document.createElement("span");
-      limb.className = `pin-${part}`;
-      body.append(limb);
-    });
-
-    const status = document.createElement("small");
-    status.className = "pin-status";
-    status.textContent = statusText(friend);
-    person.append(avatarElement(friend, "pin-head"), body);
-    pin.append(name, person, status);
+    pin.append(name, avatarElement(friend, "pin-head"));
 
     if (isNew) {
       pin.style.left = `${position.x * 100}%`;
@@ -1379,6 +1371,8 @@ function renderFriendStrip() {
     chip.addEventListener("click", () => {
       selectedFriendId = friend.id;
       renderAll();
+      renderFriendDetail(friend);
+      openDialog(els.friendDetailDialog);
     });
 
     const copy = document.createElement("span");
@@ -1396,8 +1390,9 @@ function renderFriendStrip() {
   });
 }
 
-function renderFriendList() {
-  els.friendList.replaceChildren();
+function renderFriendList(target = els.friendList, options = {}) {
+  const closeDialog = options.closeDialog === undefined ? els.friendsDialog : options.closeDialog;
+  target.replaceChildren();
 
   state.friends.forEach((friend) => {
     const row = document.createElement("button");
@@ -1407,8 +1402,10 @@ function renderFriendList() {
     row.style.setProperty("--friend-color", friend.color || "#53e2ff");
     row.addEventListener("click", () => {
       selectedFriendId = friend.id;
-      els.friendsDialog.close();
       renderAll();
+      renderFriendDetail(friend);
+      if (closeDialog?.open) closeDialog.close();
+      openDialog(els.friendDetailDialog);
     });
 
     const copy = document.createElement("span");
@@ -1422,7 +1419,41 @@ function renderFriendList() {
 
     copy.append(name, status);
     row.append(avatarElement(friend, "mini-avatar"), copy);
-    els.friendList.append(row);
+    target.append(row);
+  });
+}
+
+function renderFriendDetail(friend = selectedFriend()) {
+  const current = state.friends.find((item) => item.id === friend.id) || friend;
+  els.friendDetailName.textContent = current.name || "Friend";
+  renderAvatarInto(els.friendDetailAvatar, current);
+  els.friendDetailNow.textContent = statusText(current);
+  els.friendDetailSource.textContent = locationSourceText(current);
+  els.friendDetailSchedule.replaceChildren();
+
+  const dayOrder = new Map(Object.keys(days).map((day, index) => [day, index]));
+  const schedule = [...(current.schedule || [])].sort((a, b) => {
+    const dayDiff = (dayOrder.get(a.day) || 0) - (dayOrder.get(b.day) || 0);
+    return dayDiff || a.start - b.start;
+  });
+
+  if (!schedule.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No schedule uploaded yet.";
+    els.friendDetailSchedule.append(empty);
+    return;
+  }
+
+  schedule.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "parsed-event";
+    const title = document.createElement("strong");
+    title.textContent = item.artist;
+    const meta = document.createElement("span");
+    meta.textContent = `${days[item.day].label} - ${formatTime(item.start)} to ${formatTime(item.end)} - ${stageById(item.stageId).name}`;
+    row.append(title, meta);
+    els.friendDetailSchedule.append(row);
   });
 }
 
@@ -2138,7 +2169,7 @@ function offsetPosition(friend, stage, groups) {
 
   const index = group.indexOf(friend.id);
   const angle = (index / group.length) * Math.PI * 2;
-  const radius = 0.038;
+  const radius = Math.min(0.078, 0.048 + Math.max(0, group.length - 2) * 0.008);
   return clampMapPosition({
     x: base.x + Math.cos(angle) * radius,
     y: base.y + Math.sin(angle) * radius
