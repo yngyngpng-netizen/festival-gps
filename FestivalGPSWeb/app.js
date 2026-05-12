@@ -51,6 +51,9 @@ const aliases = new Map([
   ["quantum", "quantum-valley"],
   ["stereobloom", "stereo-bloom"],
   ["bionicjungle", "bionic-jungle"],
+  ["beatboxartcar", "art-cars"],
+  ["beatboxart", "art-cars"],
+  ["beatbox", "art-cars"],
   ["artcars", "art-cars"],
   ["artcar", "art-cars"],
   ["downtownedc", "downtown-edc"],
@@ -86,6 +89,7 @@ let groupMode = "create";
 let locationWatchId = null;
 let locationSharing = false;
 let lastLocationPersistedAt = 0;
+let lastPinPositions = new Map();
 
 const els = {};
 
@@ -1047,17 +1051,21 @@ function renderRoutes() {
 function renderPins() {
   els.pinLayer.replaceChildren();
   const placements = stagePlacements();
+  const nextPositions = new Map();
 
   state.friends.forEach((friend) => {
     const stage = stageForFriend(friend);
     const position = positionForFriend(friend, stage, placements);
+    const previous = lastPinPositions.get(friend.id);
+    const isMoving = Boolean(previous && Math.hypot(previous.x - position.x, previous.y - position.y) > 0.01);
     const pin = document.createElement("button");
     pin.type = "button";
     pin.className = "friend-pin";
     pin.classList.toggle("selected", friend.id === selectedFriendId);
     pin.classList.toggle("live", Boolean(liveLocationForFriend(friend)));
-    pin.style.left = `${position.x * 100}%`;
-    pin.style.top = `${position.y * 100}%`;
+    pin.classList.toggle("walking", isMoving);
+    pin.style.left = `${(isMoving ? previous.x : position.x) * 100}%`;
+    pin.style.top = `${(isMoving ? previous.y : position.y) * 100}%`;
     pin.style.setProperty("--friend-color", friend.color || "#53e2ff");
     pin.setAttribute("aria-label", `${friend.name}, ${statusText(friend)}`);
     pin.addEventListener("click", () => {
@@ -1065,15 +1073,40 @@ function renderPins() {
       renderAll();
     });
 
-    const label = document.createElement("span");
-    label.className = "pin-label";
-    label.append(document.createTextNode(friend.name || "Friend"));
+    const name = document.createElement("span");
+    name.className = "pin-name";
+    name.textContent = friend.name || "Friend";
+
+    const person = document.createElement("span");
+    person.className = "pin-person";
+
+    const body = document.createElement("span");
+    body.className = "pin-body";
+    ["torso", "arm left", "arm right", "leg left", "leg right"].forEach((part) => {
+      const limb = document.createElement("span");
+      limb.className = `pin-${part}`;
+      body.append(limb);
+    });
+
     const status = document.createElement("small");
+    status.className = "pin-status";
     status.textContent = statusText(friend);
-    label.append(status);
-    pin.append(avatarElement(friend, "avatar"), label);
+    person.append(avatarElement(friend, "pin-head"), body);
+    pin.append(name, person, status);
     els.pinLayer.append(pin);
+
+    if (isMoving) {
+      requestAnimationFrame(() => {
+        pin.style.left = `${position.x * 100}%`;
+        pin.style.top = `${position.y * 100}%`;
+        window.setTimeout(() => pin.classList.remove("walking"), 1300);
+      });
+    }
+
+    nextPositions.set(friend.id, position);
   });
+
+  lastPinPositions = nextPositions;
 }
 
 function renderFriendStrip() {
@@ -1197,17 +1230,74 @@ async function recognizeSchedule(file) {
   els.ocrStatus.textContent = "Reading schedule picture...";
 
   try {
-    const result = await window.Tesseract.recognize(file, "eng", {
-      logger: (message) => updateOcrProgress(message)
-    });
-    const text = result?.data?.text || "";
-    els.ocrText.value = text;
-    parsedEvents = parseSchedule(text, els.scheduleDay.value);
-    els.ocrStatus.textContent = parsedEvents.length ? `${parsedEvents.length} sets generated.` : "No sets generated.";
+    const enhancedImage = await preprocessScheduleImage(file);
+    const attempts = [
+      { name: "enhanced", image: enhancedImage },
+      { name: "original", image: file }
+    ];
+    let best = { text: "", events: [] };
+
+    for (const attempt of attempts) {
+      els.ocrStatus.textContent = attempt.name === "enhanced"
+        ? "Reading cleaned schedule text..."
+        : "Checking original image...";
+      const result = await window.Tesseract.recognize(attempt.image, "eng", {
+        logger: (message) => updateOcrProgress(message),
+        preserve_interword_spaces: "1",
+        tessedit_pageseg_mode: "6",
+        user_defined_dpi: "300"
+      });
+      const text = result?.data?.text || "";
+      const events = parseSchedule(text, els.scheduleDay.value);
+      if (events.length > best.events.length) best = { text, events };
+      if (events.length >= 3) break;
+    }
+
+    els.ocrText.value = best.text;
+    parsedEvents = best.events;
+    els.ocrStatus.textContent = parsedEvents.length
+      ? `${parsedEvents.length} sets generated.`
+      : "No sets generated. Try cropping to the schedule rows or paste the text here.";
     renderParsedSchedule();
   } catch (error) {
     els.ocrStatus.textContent = `OCR failed: ${error.message || error}`;
   }
+}
+
+async function preprocessScheduleImage(file) {
+  const image = await loadImage(file);
+  const cropX = Math.round(image.width * 0.12);
+  const cropY = Math.round(image.height * 0.14);
+  const cropWidth = Math.round(image.width * 0.86);
+  const cropHeight = Math.round(image.height * 0.68);
+  const scale = Math.min(1.8, Math.max(1.25, 1900 / cropWidth));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(cropWidth * scale);
+  canvas.height = Math.round(cropHeight * scale);
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = imageData;
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index];
+    const green = data[index + 1];
+    const blue = data[index + 2];
+    const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+    const textPixel = luminance > 145;
+    const value = textPixel ? 0 : 255;
+    data[index] = value;
+    data[index + 1] = value;
+    data[index + 2] = value;
+    data[index + 3] = 255;
+  }
+  context.putImageData(imageData, 0, 0);
+  return canvas;
 }
 
 function updateOcrProgress(message) {
@@ -1236,27 +1326,32 @@ async function applySchedule() {
 }
 
 function parseSchedule(text, defaultDay) {
-  const lines = text
-    .replace(/\u2028/g, "\n")
+  const normalizedText = normalizeScheduleText(text);
+  const lines = normalizedText
     .split(/\n+/)
-    .map((line) => line.trim())
+    .map(compactScheduleLine)
     .filter(Boolean);
 
-  let currentDay = dayIn(text) || defaultDay;
+  let currentDay = dayIn(normalizedText) || defaultDay;
   const output = [];
+  let lastArtist = "";
 
   lines.forEach((line, index) => {
     const lineDay = dayIn(line);
     if (lineDay) currentDay = lineDay;
 
     const range = parseTimeRange(line);
-    if (!range) return;
+    if (!range) {
+      const candidate = artistCandidate(line);
+      if (candidate) lastArtist = candidate;
+      return;
+    }
 
     const previous = lines[index - 1] || "";
     const next = lines[index + 1] || "";
     const context = `${previous} ${line} ${next}`;
-    const stageId = stageIdIn(context) || "speedway-entry";
-    const artist = artistName(line, previous, next, range.matchText);
+    const stageId = stageIdFromScheduleLine(line, range.matchText) || stageIdIn(context) || "speedway-entry";
+    const artist = artistNameFromScheduleLine(line, lastArtist, previous, next, range.matchText);
 
     output.push({
       id: cryptoId(),
@@ -1266,11 +1361,77 @@ function parseSchedule(text, defaultDay) {
       start: range.start,
       end: range.end
     });
+    lastArtist = "";
   });
 
-  return output.sort((a, b) => {
+  return dedupeScheduleEvents(output).sort((a, b) => {
     if (a.day === b.day) return a.start - b.start;
     return Object.keys(days).indexOf(a.day) - Object.keys(days).indexOf(b.day);
+  });
+}
+
+function normalizeScheduleText(text) {
+  return String(text || "")
+    .replace(/\u2028/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[‐‑‒–—−]/g, " - ")
+    .replace(/[|]/g, " ")
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'");
+}
+
+function compactScheduleLine(line) {
+  return line
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\s+-\s+/g, " - ")
+    .replace(/\s+to\s+/gi, " to ");
+}
+
+function artistCandidate(line) {
+  if (parseTimeRange(line) || dayIn(line)) return "";
+  const candidate = cleanArtist(line);
+  const value = normalize(candidate);
+  if (!candidate || candidate.length > 70) return "";
+  if (value.includes("myschedule") || value.includes("edclasvegas") || value === "2026") return "";
+  if (exactStageNameIn(candidate)) return "";
+  return candidate;
+}
+
+function exactStageNameIn(text) {
+  const value = normalize(text);
+  return stages.some((stage) => stage.id !== "speedway-entry" && value === normalize(stage.name));
+}
+
+function stageIdFromScheduleLine(line, matchedText) {
+  const matchIndex = line.indexOf(matchedText);
+  if (matchIndex < 0) return "";
+  const afterRange = line.slice(matchIndex + matchedText.length);
+  const tail = afterRange.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean).at(-1) || afterRange;
+  return stageIdIn(tail);
+}
+
+function artistNameFromScheduleLine(line, lastArtist, previous, next, matchedText) {
+  const matchIndex = line.indexOf(matchedText);
+  const beforeRange = matchIndex >= 0 ? line.slice(0, matchIndex) : "";
+  const inlineArtist = cleanArtist(beforeRange);
+  if (inlineArtist && !dayIn(inlineArtist) && !looksLikeScheduleChrome(inlineArtist)) return inlineArtist;
+  if (lastArtist) return lastArtist;
+  return artistName(line, previous, next, matchedText);
+}
+
+function looksLikeScheduleChrome(value) {
+  const normalized = normalize(value);
+  return normalized.includes("myschedule") || normalized.includes("edclasvegas") || normalized.includes("lasvegas2026");
+}
+
+function dedupeScheduleEvents(events) {
+  const seen = new Set();
+  return events.filter((event) => {
+    const key = [event.day, event.start, event.end, event.stageId, normalize(event.artist)].join(":");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 
@@ -1358,7 +1519,7 @@ function cleanArtist(value) {
   stages.forEach((stage) => {
     output = output.replace(new RegExp(escapeRegExp(stage.name), "ig"), " ");
   });
-  ["Friday", "Saturday", "Sunday", "Fri", "Sat", "Sun", "EDC", "EDC Las Vegas"].forEach((word) => {
+  ["My Schedule", "Friday", "Saturday", "Sunday", "Fri", "Sat", "Sun", "EDC Las Vegas 2026", "EDC Las Vegas", "EDC"].forEach((word) => {
     output = output.replace(new RegExp(`\\b${escapeRegExp(word)}\\b`, "ig"), " ");
   });
 

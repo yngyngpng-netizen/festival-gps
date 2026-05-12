@@ -1,10 +1,10 @@
-const CACHE_NAME = "festival-gps-v9";
+const CACHE_NAME = "festival-gps-v10";
 const MAP_IMAGE_HOST = "d3vhc53cl8e8km.cloudfront.net";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=20260512-5",
-  "./app.js?v=20260512-5",
+  "./styles.css?v=20260512-6",
+  "./app.js?v=20260512-6",
   "./base44-config.js",
   "./firebase-config.js",
   "./manifest.webmanifest",
