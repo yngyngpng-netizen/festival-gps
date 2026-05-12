@@ -3,10 +3,16 @@ import { firebaseConfig, firebaseIsConfigured } from "./firebase-config.js";
 
 const STORAGE_KEY = "festival-gps-pwa-v2";
 const LAST_GROUP_KEY = "festival-gps-last-group";
-const SVG_NS = "http://www.w3.org/2000/svg";
 const EMAIL_ONLY_SECRET = "festival-gps-edc-2026-email-only-v1";
 const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
+const EDC_GEO_MARGIN = 0.0015;
+const MAP_PIN_BOUNDS = {
+  minX: 0.06,
+  maxX: 0.69,
+  minY: 0.13,
+  maxY: 0.92
+};
 const EDC_GEO_BOUNDS = {
   north: 36.282,
   south: 36.258,
@@ -25,19 +31,25 @@ const days = {
   sunday: { label: "Sunday", short: "Sun", date: "May 17", start: 19 * 60, end: 29 * 60 + 30 }
 };
 
+const festivalWindows = {
+  friday: { start: new Date(2026, 4, 15, 17, 0), end: new Date(2026, 4, 16, 5, 30) },
+  saturday: { start: new Date(2026, 4, 16, 19, 0), end: new Date(2026, 4, 17, 5, 30) },
+  sunday: { start: new Date(2026, 4, 17, 19, 0), end: new Date(2026, 4, 18, 5, 30) }
+};
+
 const stages = [
-  { id: "kinetic-field", name: "Kinetic Field", short: "KF", x: 0.65, y: 0.16, color: "#ff4fd8", art: "linear-gradient(135deg, #15132a, #ff4fd8 58%, #ffe86a)" },
-  { id: "cosmic-meadow", name: "Cosmic Meadow", short: "CM", x: 0.21, y: 0.48, color: "#53e2ff", art: "linear-gradient(135deg, #10263a, #53e2ff 54%, #f8f4a6)" },
-  { id: "circuit-grounds", name: "Circuit Grounds", short: "CG", x: 0.80, y: 0.84, color: "#a5ff5f", art: "linear-gradient(135deg, #152918, #a5ff5f 56%, #53e2ff)" },
-  { id: "neon-garden", name: "Neon Garden", short: "NG", x: 0.79, y: 0.52, color: "#ffe45f", art: "linear-gradient(135deg, #30250a, #ffe45f 54%, #ff4fd8)" },
-  { id: "basspod", name: "Basspod", short: "BP", x: 0.57, y: 0.84, color: "#ff6b6b", art: "linear-gradient(135deg, #321414, #ff6b6b 56%, #8e7cff)" },
-  { id: "wasteland", name: "Wasteland", short: "WL", x: 0.21, y: 0.80, color: "#ff9f43", art: "linear-gradient(135deg, #321c0b, #ff9f43 55%, #f8f4a6)" },
-  { id: "quantum-valley", name: "Quantum Valley", short: "QV", x: 0.78, y: 0.30, color: "#8e7cff", art: "linear-gradient(135deg, #161238, #8e7cff 55%, #53e2ff)" },
-  { id: "stereo-bloom", name: "Stereo Bloom", short: "SB", x: 0.38, y: 0.36, color: "#4dffb8", art: "linear-gradient(135deg, #102d27, #4dffb8 55%, #ffe45f)" },
-  { id: "bionic-jungle", name: "Bionic Jungle", short: "BJ", x: 0.22, y: 0.31, color: "#f86fff", art: "linear-gradient(135deg, #2c1232, #f86fff 56%, #a5ff5f)" },
-  { id: "art-cars", name: "Art Cars", short: "AC", x: 0.37, y: 0.55, color: "#f8f4a6", art: "linear-gradient(135deg, #2d2a10, #f8f4a6 58%, #ff9f43)" },
-  { id: "downtown-edc", name: "Downtown EDC", short: "DT", x: 0.48, y: 0.58, color: "#7de2d1", art: "linear-gradient(135deg, #102b2c, #7de2d1 58%, #ff4fd8)" },
-  { id: "speedway-entry", name: "Speedway Entry", short: "IN", x: 0.07, y: 0.48, color: "#007aff", art: "linear-gradient(135deg, #f5f7fb, #d9e5ff)" }
+  { id: "kinetic-field", name: "Kinetic Field", short: "KF", x: 0.43, y: 0.17, color: "#ff4fd8", art: "linear-gradient(135deg, #15132a, #ff4fd8 58%, #ffe86a)" },
+  { id: "cosmic-meadow", name: "Cosmic Meadow", short: "CM", x: 0.16, y: 0.50, color: "#53e2ff", art: "linear-gradient(135deg, #10263a, #53e2ff 54%, #f8f4a6)" },
+  { id: "circuit-grounds", name: "Circuit Grounds", short: "CG", x: 0.55, y: 0.85, color: "#a5ff5f", art: "linear-gradient(135deg, #152918, #a5ff5f 56%, #53e2ff)" },
+  { id: "neon-garden", name: "Neon Garden", short: "NG", x: 0.57, y: 0.52, color: "#ffe45f", art: "linear-gradient(135deg, #30250a, #ffe45f 54%, #ff4fd8)" },
+  { id: "basspod", name: "Basspod", short: "BP", x: 0.43, y: 0.84, color: "#ff6b6b", art: "linear-gradient(135deg, #321414, #ff6b6b 56%, #8e7cff)" },
+  { id: "wasteland", name: "Wasteland", short: "WL", x: 0.17, y: 0.82, color: "#ff9f43", art: "linear-gradient(135deg, #321c0b, #ff9f43 55%, #f8f4a6)" },
+  { id: "quantum-valley", name: "Quantum Valley", short: "QV", x: 0.55, y: 0.31, color: "#8e7cff", art: "linear-gradient(135deg, #161238, #8e7cff 55%, #53e2ff)" },
+  { id: "stereo-bloom", name: "Stereo Bloom", short: "SB", x: 0.30, y: 0.36, color: "#4dffb8", art: "linear-gradient(135deg, #102d27, #4dffb8 55%, #ffe45f)" },
+  { id: "bionic-jungle", name: "Bionic Jungle", short: "BJ", x: 0.16, y: 0.31, color: "#f86fff", art: "linear-gradient(135deg, #2c1232, #f86fff 56%, #a5ff5f)" },
+  { id: "art-cars", name: "Art Cars", short: "AC", x: 0.32, y: 0.43, color: "#f8f4a6", art: "linear-gradient(135deg, #2d2a10, #f8f4a6 58%, #ff9f43)" },
+  { id: "downtown-edc", name: "Downtown EDC", short: "DT", x: 0.36, y: 0.59, color: "#7de2d1", art: "linear-gradient(135deg, #102b2c, #7de2d1 58%, #ff4fd8)" },
+  { id: "speedway-entry", name: "Speedway Entry", short: "IN", x: 0.07, y: 0.57, color: "#007aff", art: "linear-gradient(135deg, #f5f7fb, #d9e5ff)" }
 ];
 
 const aliases = new Map([
@@ -115,6 +127,9 @@ let locationWatchId = null;
 let locationSharing = false;
 let lastLocationPersistedAt = 0;
 let lastPinPositions = new Map();
+let timelineClockId = null;
+let timelineFollowsClock = true;
+let lastLocationProblem = "";
 let mapkitState = {
   ready: false,
   loading: false,
@@ -263,6 +278,7 @@ function bindEvents() {
   });
 
   els.timeRange.addEventListener("input", () => {
+    timelineFollowsClock = false;
     state.selectedMinute = Number(els.timeRange.value);
     saveLocalStore();
     renderAll();
@@ -899,6 +915,7 @@ async function saveProfile() {
 
 async function signOutUser() {
   stopLiveLocation();
+  stopTimelineClock();
   if (services.unsubscribeGroup) services.unsubscribeGroup();
   services.unsubscribeGroup = null;
 
@@ -933,11 +950,13 @@ function toggleLiveLocation() {
 
 function startLiveLocation(options = {}) {
   if (!navigator.geolocation) {
-    if (!options.quiet) els.authMessage.textContent = "Location is not available in this browser.";
+    lastLocationProblem = "GPS unavailable, using schedule";
+    if (!options.quiet) renderAll();
     return;
   }
 
   if (locationSharing) return;
+  lastLocationProblem = "";
   setLocationButtonState("starting");
 
   locationWatchId = navigator.geolocation.watchPosition(
@@ -956,29 +975,42 @@ function startLiveLocation(options = {}) {
   renderAll();
 }
 
-function stopLiveLocation() {
+function stopLiveLocation(options = {}) {
   if (locationWatchId !== null) {
     navigator.geolocation.clearWatch(locationWatchId);
   }
   locationWatchId = null;
   locationSharing = false;
+  if (!options.keepProblem) lastLocationProblem = "";
   localStore.shareLocation = false;
   saveLocalStore();
 }
 
 async function handleLivePosition(position) {
   const user = currentUser();
+  const lat = position.coords.latitude;
+  const lon = position.coords.longitude;
+  const accuracy = position.coords.accuracy;
+
+  if (!coordinateWithinEdc(lat, lon, accuracy)) {
+    lastLocationProblem = "GPS outside EDC map, using schedule";
+    await clearOwnLiveLocation();
+    renderAll();
+    return;
+  }
+
   const liveLocation = normalizeLiveLocation({
-    lat: position.coords.latitude,
-    lon: position.coords.longitude,
-    accuracy: position.coords.accuracy,
-    x: geoX(position.coords.longitude),
-    y: geoY(position.coords.latitude),
+    lat,
+    lon,
+    accuracy,
+    x: geoX(lon),
+    y: geoY(lat),
     updatedAt: new Date(position.timestamp || Date.now()).toISOString(),
     online: navigator.onLine,
     source: "gps"
   });
 
+  lastLocationProblem = "";
   user.liveLocation = liveLocation;
   state.user = user;
   renderAll();
@@ -995,38 +1027,49 @@ async function handleLivePosition(position) {
   }
 }
 
-function handleLiveLocationError(error, options = {}) {
+async function handleLiveLocationError(error, options = {}) {
+  lastLocationProblem = error?.code === error?.PERMISSION_DENIED
+    ? "Location permission off, using schedule"
+    : "GPS unavailable, using schedule";
+  await clearOwnLiveLocation({ persist: true });
   if (!options.quiet) {
-    const denied = error?.code === error?.PERMISSION_DENIED;
-    const message = denied ? "Location sharing is off." : "Live location paused. Schedule fallback is active.";
-    els.authMessage.textContent = message;
+    renderAll();
   }
-  stopLiveLocation();
+  stopLiveLocation({ keepProblem: true });
   renderAll();
+}
+
+async function clearOwnLiveLocation(options = {}) {
+  const user = currentUser();
+  if (!user?.id) return;
+
+  const hadLiveLocation = Boolean(user.liveLocation || state.user?.liveLocation);
+  user.liveLocation = null;
+  if (state.user?.id === user.id) state.user = { ...state.user, liveLocation: null };
+
+  const friend = state.friends.find((item) => item.id === user.id);
+  if (friend) friend.liveLocation = null;
+
+  if (!hadLiveLocation || options.persist === false) return;
+
+  try {
+    await persistCurrentMember({ updateProfile: false });
+  } catch {
+    localStore.pendingLiveLocation = null;
+    saveLocalStore();
+  }
 }
 
 function renderLocationState() {
   const selected = selectedFriend();
   const live = liveLocationForFriend(selected);
   const ownLive = liveLocationForFriend(currentUser());
-  const selectedIsSelf = selected.id === state.user?.id;
 
   els.locationButton.classList.toggle("active", locationSharing);
   els.locationButton.classList.toggle("fresh", Boolean(ownLive));
   els.locationButton.classList.toggle("starting", locationSharing && !ownLive);
   els.locationButton.setAttribute("aria-pressed", String(locationSharing));
-
-  if (!navigator.onLine) {
-    els.locationStatus.textContent = "Offline fallback";
-  } else if (selectedIsSelf && locationSharing && ownLive) {
-    els.locationStatus.textContent = `Live GPS ${relativeAge(ownLive.updatedAt)}`;
-  } else if (live) {
-    els.locationStatus.textContent = `Friend live ${relativeAge(live.updatedAt)}`;
-  } else if (selectedIsSelf && locationSharing) {
-    els.locationStatus.textContent = "Waiting for GPS";
-  } else {
-    els.locationStatus.textContent = "Schedule fallback";
-  }
+  els.locationStatus.textContent = statusText(selected);
 }
 
 function setLocationButtonState(stateName) {
@@ -1100,12 +1143,15 @@ function renderAuthGate() {
   els.appShell.hidden = !signedIn;
 
   if (!signedIn) {
+    stopTimelineClock();
     els.cloudBadge.textContent = services.provider === "base44"
       ? "Base44 secure sync"
       : (services.cloud ? "Firebase secure sync" : "Local demo store");
     return;
   }
 
+  startTimelineClock();
+  syncTimelineToNow({ render: false });
   selectedFriendId = state.friends.some((friend) => friend.id === selectedFriendId)
     ? selectedFriendId
     : state.user.id;
@@ -1152,13 +1198,69 @@ function renderDayButtons() {
     button.type = "button";
     button.textContent = day.short;
     button.addEventListener("click", () => {
+      timelineFollowsClock = true;
       state.selectedDay = id;
       state.selectedMinute = clamp(state.selectedMinute, day.start, day.end);
+      syncTimelineToNow({ render: false });
       saveLocalStore();
       renderAll();
     });
     els.dayButtons.append(button);
   });
+}
+
+function startTimelineClock() {
+  if (timelineClockId) return;
+  timelineClockId = window.setInterval(() => syncTimelineToNow({ render: true }), 60 * 1000);
+}
+
+function stopTimelineClock() {
+  if (!timelineClockId) return;
+  window.clearInterval(timelineClockId);
+  timelineClockId = null;
+}
+
+function syncTimelineToNow(options = {}) {
+  if (!timelineFollowsClock || !state.user) return false;
+
+  const moment = festivalMomentForNow(new Date()) || previewMomentForCurrentClock(new Date(), state.selectedDay);
+  if (!moment) return false;
+
+  const changed = state.selectedDay !== moment.day || state.selectedMinute !== moment.minute;
+  state.selectedDay = moment.day;
+  state.selectedMinute = moment.minute;
+
+  if (changed) saveLocalStore();
+  if (changed && options.render) renderAll();
+  return changed;
+}
+
+function festivalMomentForNow(now) {
+  for (const [dayId, windowRange] of Object.entries(festivalWindows)) {
+    if (now >= windowRange.start && now <= windowRange.end) {
+      return {
+        day: dayId,
+        minute: minuteForFestivalClock(now)
+      };
+    }
+  }
+
+  return null;
+}
+
+function previewMomentForCurrentClock(now, dayId) {
+  const day = days[dayId];
+  if (!day) return null;
+
+  const minute = minuteForFestivalClock(now);
+  if (minute < day.start || minute > day.end) return null;
+  return { day: dayId, minute };
+}
+
+function minuteForFestivalClock(now) {
+  let minute = now.getHours() * 60 + now.getMinutes();
+  if (minute < 12 * 60) minute += 24 * 60;
+  return minute;
 }
 
 function renderStages() {
@@ -1186,24 +1288,6 @@ function renderStages() {
 
 function renderRoutes() {
   els.routeLayer.replaceChildren();
-
-  state.friends.forEach((friend) => {
-    const points = friend.schedule
-      .filter((item) => item.day === state.selectedDay)
-      .sort((a, b) => a.start - b.start)
-      .map((item) => stageById(item.stageId))
-      .filter(Boolean)
-      .map((stage) => screenPositionForStage(stage))
-      .map((point) => `${Math.round(point.x * 1000)},${Math.round(point.y * 1000)}`);
-
-    if (points.length < 2) return;
-
-    const line = document.createElementNS(SVG_NS, "polyline");
-    line.setAttribute("points", points.join(" "));
-    line.setAttribute("class", friend.id === selectedFriendId ? "route-line selected" : "route-line");
-    line.setAttribute("stroke", friend.color || "#53e2ff");
-    els.routeLayer.append(line);
-  });
 }
 
 function renderPins() {
@@ -1345,7 +1429,7 @@ function renderFriendList() {
 function renderSelectedFriendSummary() {
   const selected = selectedFriend();
   els.selectedFriendName.textContent = selected.name || "Your crew";
-  els.selectedFriendStage.textContent = statusText(selected);
+  els.selectedFriendStage.textContent = locationSourceText(selected);
 }
 
 function renderAuthPhotoPreview(photo, name) {
@@ -2013,15 +2097,29 @@ function displayEvent(friend) {
 
 function statusText(friend) {
   const live = liveLocationForFriend(friend);
-  if (live) return `Live GPS - ${stageById(live.stageId).name}`;
+  if (live) return `Live GPS: ${stageById(live.stageId).name}`;
 
   const active = activeEvent(friend);
-  if (active) return `${active.artist} - ${stageById(active.stageId).name}`;
+  if (active) return `Now: ${active.artist}, ${stageById(active.stageId).name}`;
 
   const display = displayEvent(friend);
-  if (display) return `${display.start > state.selectedMinute ? "Next" : "Last"}: ${display.artist}`;
+  if (display) {
+    const label = display.start > state.selectedMinute ? "Next" : "Last";
+    return `${label}: ${display.artist}, ${stageById(display.stageId).name}`;
+  }
 
   return "No schedule yet";
+}
+
+function locationSourceText(friend) {
+  const live = liveLocationForFriend(friend);
+  const selectedIsSelf = friend.id === state.user?.id;
+
+  if (live) return `${selectedIsSelf ? "Your" : "Friend"} live GPS ${relativeAge(live.updatedAt)}`;
+  if (!navigator.onLine) return "Offline, using schedule";
+  if (selectedIsSelf && lastLocationProblem) return lastLocationProblem;
+  if (selectedIsSelf && locationSharing) return "Waiting for GPS, using schedule";
+  return "Schedule fallback";
 }
 
 function stagePlacements() {
@@ -2036,35 +2134,35 @@ function stagePlacements() {
 function offsetPosition(friend, stage, groups) {
   const base = screenPositionForStage(stage);
   const group = groups.get(stage.id) || [];
-  if (group.length <= 1) return base;
+  if (group.length <= 1) return clampMapPosition(base);
 
   const index = group.indexOf(friend.id);
   const angle = (index / group.length) * Math.PI * 2;
   const radius = 0.038;
-  return {
-    x: clamp(base.x + Math.cos(angle) * radius, 0.06, 0.94),
-    y: clamp(base.y + Math.sin(angle) * radius, 0.08, 0.94)
-  };
+  return clampMapPosition({
+    x: base.x + Math.cos(angle) * radius,
+    y: base.y + Math.sin(angle) * radius
+  });
 }
 
 function positionForFriend(friend, stage, groups) {
   const live = liveLocationForFriend(friend);
   if (live) {
-    return screenPositionForLiveLocation(live);
+    return clampMapPosition(screenPositionForLiveLocation(live));
   }
 
-  return offsetPosition(friend, stage, groups);
+  return clampMapPosition(offsetPosition(friend, stage, groups));
 }
 
 function screenPositionForStage(stage) {
-  return screenPositionForCoordinate(coordinateForNormalized(stage.x, stage.y)) || { x: stage.x, y: stage.y };
+  return clampMapPosition(screenPositionForCoordinate(coordinateForNormalized(stage.x, stage.y)) || { x: stage.x, y: stage.y });
 }
 
 function screenPositionForLiveLocation(live) {
-  return screenPositionForCoordinate({ lat: live.lat, lon: live.lon }) || {
+  return clampMapPosition(screenPositionForCoordinate({ lat: live.lat, lon: live.lon }) || {
     x: clamp(live.x, 0.04, 0.96),
     y: clamp(live.y, 0.06, 0.96)
-  };
+  });
 }
 
 function screenPositionForCoordinate(coordinate) {
@@ -2090,9 +2188,17 @@ function coordinateForNormalized(x, y) {
   };
 }
 
+function clampMapPosition(position) {
+  return {
+    x: clamp(position.x, MAP_PIN_BOUNDS.minX, MAP_PIN_BOUNDS.maxX),
+    y: clamp(position.y, MAP_PIN_BOUNDS.minY, MAP_PIN_BOUNDS.maxY)
+  };
+}
+
 function liveLocationForFriend(friend) {
   const live = normalizeLiveLocation(friend?.liveLocation);
   if (!live) return null;
+  if (!live.insideFestival) return null;
   if (!navigator.onLine) return null;
   const updatedAt = Date.parse(live.updatedAt);
   if (!Number.isFinite(updatedAt)) return null;
@@ -2119,8 +2225,19 @@ function normalizeLiveLocation(value) {
     updatedAt,
     online: value.online !== false,
     source: value.source || "gps",
-    stageId: nearestStageId(x, y)
+    stageId: nearestStageId(x, y),
+    insideFestival: coordinateWithinEdc(lat, lon, value.accuracy)
   };
+}
+
+function coordinateWithinEdc(lat, lon, accuracy = 0) {
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) return false;
+  const accuracyMargin = Number.isFinite(Number(accuracy)) ? Math.min(0.006, Math.max(0, Number(accuracy) / 111000)) : 0;
+  const margin = Math.max(EDC_GEO_MARGIN, accuracyMargin);
+  return lat >= EDC_GEO_BOUNDS.south - margin
+    && lat <= EDC_GEO_BOUNDS.north + margin
+    && lon >= EDC_GEO_BOUNDS.west - margin
+    && lon <= EDC_GEO_BOUNDS.east + margin;
 }
 
 function nearestStageId(x, y) {

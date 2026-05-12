@@ -755,6 +755,7 @@ textarea {
 .map-building.b5 { left: 14%; top: 76%; }
 
 .route-layer {
+  display: none;
   z-index: 4;
   pointer-events: none;
 }
