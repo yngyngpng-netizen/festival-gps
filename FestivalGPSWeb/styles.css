@@ -449,10 +449,59 @@ textarea {
 
 .top-meta {
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .toolbar {
   gap: 8px;
+}
+
+.group-code-chip {
+  min-height: 40px;
+  max-width: min(44vw, 210px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 6px 5px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  column-gap: 6px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--ink);
+  box-shadow: 0 8px 20px rgba(31, 35, 45, 0.10);
+}
+
+.group-code-chip span,
+.group-code-chip strong {
+  min-width: 0;
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-code-chip span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1.05;
+  text-transform: uppercase;
+}
+
+.group-code-chip strong {
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
+}
+
+.copy-mini {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  background: var(--cyan);
+  color: white;
+  border-color: transparent;
 }
 
 .group-chip {
@@ -1257,6 +1306,7 @@ dialog::backdrop {
 }
 
 .profile-group-panel,
+.schedule-upload-card,
 .schedule-source,
 .friend-detail-card {
   display: grid;
@@ -1265,6 +1315,35 @@ dialog::backdrop {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(118, 118, 128, 0.08);
+}
+
+.schedule-upload-card {
+  border-color: rgba(0, 122, 255, 0.26);
+  background:
+    linear-gradient(135deg, rgba(0, 122, 255, 0.16), rgba(255, 91, 215, 0.08)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow: 0 12px 28px rgba(0, 122, 255, 0.12);
+}
+
+.schedule-upload-card strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.schedule-upload-card small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.schedule-upload-card input[type="file"] {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px dashed rgba(0, 122, 255, 0.34);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
 }
 
 .schedule-source strong,
@@ -1364,6 +1443,10 @@ dialog::backdrop {
   .top-meta {
     flex-direction: column;
     align-items: flex-end;
+  }
+
+  .group-code-chip {
+    max-width: min(52vw, 220px);
   }
 
   .group-chip {

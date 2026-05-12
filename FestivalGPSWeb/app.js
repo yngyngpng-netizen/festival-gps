@@ -179,8 +179,10 @@ function bindElements() {
     "currentContext",
     "copyCodeButton",
     "crewProfileButton",
+    "groupCodeLabel",
     "map",
     "appleMapLayer",
+    "locationButton",
     "scheduleButton",
     "dayButtons",
     "timeSliderWrap",
@@ -252,6 +254,7 @@ function bindEvents() {
 
   els.copyCodeButton.addEventListener("click", copyGroupCode);
   els.crewProfileButton.addEventListener("click", openProfileSheet);
+  els.locationButton.addEventListener("click", toggleLiveLocation);
 
   els.scheduleButton.addEventListener("click", () => {
     els.scheduleDay.value = state.selectedDay;
@@ -1180,6 +1183,7 @@ function renderAll() {
   els.startTimeLabel.textContent = formatTime(day.start);
   els.endTimeLabel.textContent = formatTime(day.end);
   els.currentContext.textContent = `${day.label} ${day.date} - ${formatTime(state.selectedMinute)}`;
+  els.groupCodeLabel.textContent = state.groupCode;
   els.friendGroupCode.textContent = state.groupCode;
   els.profileGroupCode.textContent = state.groupCode;
   renderLocationState();
