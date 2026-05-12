@@ -21,18 +21,18 @@ const days = {
 };
 
 const stages = [
-  { id: "kinetic-field", name: "Kinetic Field", x: 0.65, y: 0.16, color: "#ff4fd8" },
-  { id: "cosmic-meadow", name: "Cosmic Meadow", x: 0.21, y: 0.48, color: "#53e2ff" },
-  { id: "circuit-grounds", name: "Circuit Grounds", x: 0.80, y: 0.84, color: "#a5ff5f" },
-  { id: "neon-garden", name: "Neon Garden", x: 0.79, y: 0.52, color: "#ffe45f" },
-  { id: "basspod", name: "Basspod", x: 0.57, y: 0.84, color: "#ff6b6b" },
-  { id: "wasteland", name: "Wasteland", x: 0.21, y: 0.80, color: "#ff9f43" },
-  { id: "quantum-valley", name: "Quantum Valley", x: 0.78, y: 0.30, color: "#8e7cff" },
-  { id: "stereo-bloom", name: "Stereo Bloom", x: 0.38, y: 0.36, color: "#4dffb8" },
-  { id: "bionic-jungle", name: "Bionic Jungle", x: 0.22, y: 0.31, color: "#f86fff" },
-  { id: "art-cars", name: "Art Cars", x: 0.37, y: 0.55, color: "#f8f4a6" },
-  { id: "downtown-edc", name: "Downtown EDC", x: 0.48, y: 0.58, color: "#7de2d1" },
-  { id: "speedway-entry", name: "Speedway Entry", x: 0.07, y: 0.48, color: "#f7f7ff" }
+  { id: "kinetic-field", name: "Kinetic Field", short: "KF", x: 0.65, y: 0.16, color: "#ff4fd8", art: "linear-gradient(135deg, #15132a, #ff4fd8 58%, #ffe86a)" },
+  { id: "cosmic-meadow", name: "Cosmic Meadow", short: "CM", x: 0.21, y: 0.48, color: "#53e2ff", art: "linear-gradient(135deg, #10263a, #53e2ff 54%, #f8f4a6)" },
+  { id: "circuit-grounds", name: "Circuit Grounds", short: "CG", x: 0.80, y: 0.84, color: "#a5ff5f", art: "linear-gradient(135deg, #152918, #a5ff5f 56%, #53e2ff)" },
+  { id: "neon-garden", name: "Neon Garden", short: "NG", x: 0.79, y: 0.52, color: "#ffe45f", art: "linear-gradient(135deg, #30250a, #ffe45f 54%, #ff4fd8)" },
+  { id: "basspod", name: "Basspod", short: "BP", x: 0.57, y: 0.84, color: "#ff6b6b", art: "linear-gradient(135deg, #321414, #ff6b6b 56%, #8e7cff)" },
+  { id: "wasteland", name: "Wasteland", short: "WL", x: 0.21, y: 0.80, color: "#ff9f43", art: "linear-gradient(135deg, #321c0b, #ff9f43 55%, #f8f4a6)" },
+  { id: "quantum-valley", name: "Quantum Valley", short: "QV", x: 0.78, y: 0.30, color: "#8e7cff", art: "linear-gradient(135deg, #161238, #8e7cff 55%, #53e2ff)" },
+  { id: "stereo-bloom", name: "Stereo Bloom", short: "SB", x: 0.38, y: 0.36, color: "#4dffb8", art: "linear-gradient(135deg, #102d27, #4dffb8 55%, #ffe45f)" },
+  { id: "bionic-jungle", name: "Bionic Jungle", short: "BJ", x: 0.22, y: 0.31, color: "#f86fff", art: "linear-gradient(135deg, #2c1232, #f86fff 56%, #a5ff5f)" },
+  { id: "art-cars", name: "Art Cars", short: "AC", x: 0.37, y: 0.55, color: "#f8f4a6", art: "linear-gradient(135deg, #2d2a10, #f8f4a6 58%, #ff9f43)" },
+  { id: "downtown-edc", name: "Downtown EDC", short: "DT", x: 0.48, y: 0.58, color: "#7de2d1", art: "linear-gradient(135deg, #102b2c, #7de2d1 58%, #ff4fd8)" },
+  { id: "speedway-entry", name: "Speedway Entry", short: "IN", x: 0.07, y: 0.48, color: "#007aff", art: "linear-gradient(135deg, #f5f7fb, #d9e5ff)" }
 ];
 
 const aliases = new Map([
@@ -41,6 +41,9 @@ const aliases = new Map([
   ["cosmicmeadow", "cosmic-meadow"],
   ["cosmic", "cosmic-meadow"],
   ["circuitgrounds", "circuit-grounds"],
+  ["circuitground", "circuit-grounds"],
+  ["circutgrounds", "circuit-grounds"],
+  ["circutground", "circuit-grounds"],
   ["circuit", "circuit-grounds"],
   ["neongarden", "neon-garden"],
   ["neon", "neon-garden"],
@@ -48,6 +51,8 @@ const aliases = new Map([
   ["basspodstage", "basspod"],
   ["wasteland", "wasteland"],
   ["quantumvalley", "quantum-valley"],
+  ["quantumvaley", "quantum-valley"],
+  ["quantumvally", "quantum-valley"],
   ["quantum", "quantum-valley"],
   ["stereobloom", "stereo-bloom"],
   ["bionicjungle", "bionic-jungle"],
@@ -1015,14 +1020,16 @@ function renderStages() {
     marker.style.left = `${stage.x * 100}%`;
     marker.style.top = `${stage.y * 100}%`;
     marker.style.setProperty("--stage-color", stage.color);
+    marker.style.setProperty("--stage-art", stage.art);
 
-    const dot = document.createElement("div");
-    dot.className = "stage-dot";
+    const photo = document.createElement("span");
+    photo.className = "stage-photo";
+    photo.textContent = stage.short || "";
     const name = document.createElement("span");
     name.className = "stage-name";
     name.textContent = stage.name;
 
-    marker.append(dot, name);
+    marker.append(photo, name);
     els.stageLayer.append(marker);
   });
 }
@@ -1230,46 +1237,59 @@ async function recognizeSchedule(file) {
   els.ocrStatus.textContent = "Reading schedule picture...";
 
   try {
-    const enhancedImage = await preprocessScheduleImage(file);
+    const enhancedImages = await preprocessScheduleImages(file);
     const attempts = [
-      { name: "enhanced", image: enhancedImage },
-      { name: "original", image: file }
+      ...enhancedImages.map((image, index) => ({ name: `enhanced ${index + 1}`, image })),
+      { name: "original", image: file, pageSegMode: "4" }
     ];
     let best = { text: "", events: [] };
 
     for (const attempt of attempts) {
-      els.ocrStatus.textContent = attempt.name === "enhanced"
+      els.ocrStatus.textContent = attempt.name.startsWith("enhanced")
         ? "Reading cleaned schedule text..."
         : "Checking original image...";
       const result = await window.Tesseract.recognize(attempt.image, "eng", {
         logger: (message) => updateOcrProgress(message),
         preserve_interword_spaces: "1",
-        tessedit_pageseg_mode: "6",
+        tessedit_pageseg_mode: attempt.pageSegMode || "6",
         user_defined_dpi: "300"
       });
       const text = result?.data?.text || "";
       const events = parseSchedule(text, els.scheduleDay.value);
       if (events.length > best.events.length) best = { text, events };
-      if (events.length >= 3) break;
+      if (events.length >= 6) break;
+    }
+
+    if (best.events.length < 2) {
+      const aiResult = await extractScheduleWithBase44AI(file);
+      if (aiResult?.events?.length > best.events.length) best = aiResult;
     }
 
     els.ocrText.value = best.text;
     parsedEvents = best.events;
     els.ocrStatus.textContent = parsedEvents.length
       ? `${parsedEvents.length} sets generated.`
-      : "No sets generated. Try cropping to the schedule rows or paste the text here.";
+      : "No sets generated. Crop to the schedule rows or paste the visible schedule text here.";
     renderParsedSchedule();
   } catch (error) {
     els.ocrStatus.textContent = `OCR failed: ${error.message || error}`;
   }
 }
 
-async function preprocessScheduleImage(file) {
+async function preprocessScheduleImages(file) {
   const image = await loadImage(file);
-  const cropX = Math.round(image.width * 0.12);
-  const cropY = Math.round(image.height * 0.14);
-  const cropWidth = Math.round(image.width * 0.86);
-  const cropHeight = Math.round(image.height * 0.68);
+  return [
+    preprocessScheduleVariant(image, { cropX: 0.12, cropY: 0.14, cropWidth: 0.86, cropHeight: 0.70, threshold: 145, binary: true }),
+    preprocessScheduleVariant(image, { cropX: 0.10, cropY: 0.10, cropWidth: 0.89, cropHeight: 0.78, threshold: 118, binary: false }),
+    preprocessScheduleVariant(image, { cropX: 0.00, cropY: 0.08, cropWidth: 1.00, cropHeight: 0.78, threshold: 140, binary: true })
+  ];
+}
+
+function preprocessScheduleVariant(image, options) {
+  const cropX = Math.round(image.width * options.cropX);
+  const cropY = Math.round(image.height * options.cropY);
+  const cropWidth = Math.round(image.width * options.cropWidth);
+  const cropHeight = Math.round(image.height * options.cropHeight);
   const scale = Math.min(1.8, Math.max(1.25, 1900 / cropWidth));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(cropWidth * scale);
@@ -1289,15 +1309,112 @@ async function preprocessScheduleImage(file) {
     const green = data[index + 1];
     const blue = data[index + 2];
     const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
-    const textPixel = luminance > 145;
-    const value = textPixel ? 0 : 255;
-    data[index] = value;
-    data[index + 1] = value;
-    data[index + 2] = value;
+    if (options.binary) {
+      const textPixel = luminance > options.threshold;
+      const value = textPixel ? 0 : 255;
+      data[index] = value;
+      data[index + 1] = value;
+      data[index + 2] = value;
+    } else {
+      const value = 255 - clamp((luminance - 26) * 1.55, 0, 255);
+      data[index] = value;
+      data[index + 1] = value;
+      data[index + 2] = value;
+    }
     data[index + 3] = 255;
   }
   context.putImageData(imageData, 0, 0);
   return canvas;
+}
+
+async function extractScheduleWithBase44AI(file) {
+  if (services.provider !== "base44" || !services.base44?.integrations?.Core?.InvokeLLM) return null;
+
+  try {
+    els.ocrStatus.textContent = "Asking Base44 to read the schedule image...";
+    const uploadFile = dataUrlToFile(await imageFileToDataUrl(file), "festival-schedule.jpg");
+    const upload = await services.base44.integrations.Core.UploadFile({ file: uploadFile });
+    const fileUrl = upload?.file_url;
+    if (!fileUrl) return null;
+
+    const result = await services.base44.integrations.Core.InvokeLLM({
+      prompt: [
+        "Read this EDC Las Vegas schedule screenshot.",
+        "Return every visible set as structured JSON.",
+        "Each set has artist, day, start time, end time, and stage.",
+        "Use the exact stage text if visible. Do not invent sets."
+      ].join(" "),
+      file_urls: [fileUrl],
+      response_json_schema: {
+        type: "object",
+        properties: {
+          events: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                artist: { type: "string" },
+                day: { type: "string" },
+                start: { type: "string" },
+                end: { type: "string" },
+                stage: { type: "string" }
+              },
+              required: ["artist", "day", "start", "end", "stage"]
+            }
+          }
+        },
+        required: ["events"]
+      }
+    });
+
+    const events = eventsFromAiSchedule(result);
+    if (!events.length) return null;
+    return {
+      text: events.map((event) => (
+        `${days[event.day].label} - ${formatTime(event.start)} to ${formatTime(event.end)} - ${event.artist} - ${stageById(event.stageId).name}`
+      )).join("\n"),
+      events
+    };
+  } catch {
+    return null;
+  }
+}
+
+function eventsFromAiSchedule(result) {
+  const payload = aiPayload(result);
+  const rows = Array.isArray(payload?.events) ? payload.events : [];
+
+  return dedupeScheduleEvents(rows.map((row) => {
+    const day = dayIn(row.day || "") || "friday";
+    const range = parseTimeRange(`${row.start || ""} to ${row.end || ""}`);
+    if (!range) return null;
+    return {
+      id: cryptoId(),
+      artist: cleanArtist(row.artist || "Imported Set"),
+      day,
+      start: range.start,
+      end: range.end,
+      stageId: stageIdIn(row.stage || "") || "speedway-entry"
+    };
+  }).filter(Boolean));
+}
+
+function aiPayload(result) {
+  if (typeof result === "string") return safeJson(result);
+  if (Array.isArray(result?.events)) return result;
+  if (Array.isArray(result?.output?.events)) return result.output;
+  if (Array.isArray(result?.data?.events)) return result.data;
+  if (typeof result?.text === "string") return safeJson(result.text);
+  if (typeof result?.result === "string") return safeJson(result.result);
+  return result;
+}
+
+function safeJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function updateOcrProgress(message) {
@@ -1375,6 +1492,11 @@ function normalizeScheduleText(text) {
     .replace(/\u2028/g, "\n")
     .replace(/\u00a0/g, " ")
     .replace(/[‐‑‒–—−]/g, " - ")
+    .replace(/\b([AP])\s*\.?\s*M\.?\b/gi, "$1M")
+    .replace(/(\d)[.;](\d{2})/g, "$1:$2")
+    .replace(/\b([Il])(?=:\d{2})/g, "1")
+    .replace(/\bO(?=:\d{2})/g, "0")
+    .replace(/\bt0\b/gi, "to")
     .replace(/[|]/g, " ")
     .replace(/[“”]/g, "\"")
     .replace(/[‘’]/g, "'");
@@ -1459,6 +1581,22 @@ function parseTimeRange(line) {
 
   const start = minutes(Number(singleMatch[1]), Number(singleMatch[2] || 0), period(singleMatch[3]) || "PM");
   return { start, end: start + 60, matchText: singleMatch[0] };
+}
+
+function parseSingleTime(value, fallbackPeriod) {
+  const text = normalizeScheduleText(value);
+  const match = text.match(/\b(\d{1,2})(?::|\.|\s)(\d{2})\s*(AM|PM|A\.M\.|P\.M\.)?\b/i)
+    || text.match(/\b(\d{1,2})\s*(AM|PM|A\.M\.|P\.M\.)\b/i);
+  if (!match) return NaN;
+  return minutes(
+    Number(match[1]),
+    Number(match[2] && /\d{2}/.test(match[2]) ? match[2] : 0),
+    period(match[3] || match[2]) || fallbackPeriod || "PM"
+  );
+}
+
+function periodFromTimeText(value) {
+  return period(String(value || "").match(/(AM|PM|A\.M\.|P\.M\.)/i)?.[1]);
 }
 
 function inferredStartPeriod(startHour, endHour, endPeriod) {

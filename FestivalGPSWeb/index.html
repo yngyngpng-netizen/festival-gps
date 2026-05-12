@@ -11,9 +11,9 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=20260512-6">
+    <link rel="stylesheet" href="styles.css?v=20260512-7">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260512-6"></script>
+    <script type="module" src="app.js?v=20260512-7"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Create Festival GPS account">
@@ -112,10 +112,23 @@
 
       <main class="map-shell">
         <section id="map" class="map" aria-label="EDC Las Vegas 2026 map">
-          <div class="official-map" aria-hidden="true">
-            <img src="https://d3vhc53cl8e8km.cloudfront.net/hello-staging/wp-content/uploads/sites/21/2026/05/08131244/edclv_2026_de_festival_map_1080x1350_r05_blurred.jpg" alt="">
+          <div class="map-scene" aria-hidden="true">
+            <div class="map-plane">
+              <span class="map-grass g1"></span>
+              <span class="map-grass g2"></span>
+              <span class="map-grass g3"></span>
+              <span class="map-road freeway"></span>
+              <span class="map-road main"></span>
+              <span class="map-road cross"></span>
+              <span class="map-road loop"></span>
+              <span class="map-building b1"></span>
+              <span class="map-building b2"></span>
+              <span class="map-building b3"></span>
+              <span class="map-building b4"></span>
+              <span class="map-building b5"></span>
+            </div>
           </div>
-          <div class="map-clarity" aria-hidden="true"></div>
+          <div class="map-glass" aria-hidden="true"></div>
           <svg id="routeLayer" class="route-layer" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
           <div id="stageLayer" class="stage-layer"></div>
           <div id="pinLayer" class="pin-layer"></div>

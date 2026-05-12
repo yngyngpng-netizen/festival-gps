@@ -1,19 +1,19 @@
 :root {
-  color-scheme: dark;
-  --bg: #060711;
-  --ink: #fbfbff;
-  --muted: rgba(251, 251, 255, 0.68);
-  --soft: rgba(251, 251, 255, 0.10);
-  --line: rgba(251, 251, 255, 0.16);
-  --panel: rgba(12, 14, 27, 0.72);
-  --panel-solid: #111423;
-  --cyan: #62e7ff;
+  color-scheme: light;
+  --bg: #eef1f5;
+  --ink: #111114;
+  --muted: rgba(60, 60, 67, 0.68);
+  --soft: rgba(60, 60, 67, 0.10);
+  --line: rgba(60, 60, 67, 0.18);
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-solid: #ffffff;
+  --cyan: #007aff;
   --pink: #ff5bd7;
-  --green: #adff68;
-  --yellow: #ffe86a;
-  --violet: #9d85ff;
-  --coral: #ff7a6e;
-  --radius: 8px;
+  --green: #34c759;
+  --yellow: #ffcc00;
+  --violet: #5856d6;
+  --coral: #ff3b30;
+  --radius: 16px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -56,9 +56,9 @@ button {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(132deg, rgba(98, 231, 255, 0.18), transparent 32%),
-    linear-gradient(300deg, rgba(255, 91, 215, 0.16), transparent 36%),
-    linear-gradient(180deg, #080914 0%, #111025 44%, #070813 100%);
+    linear-gradient(132deg, rgba(0, 122, 255, 0.18), transparent 34%),
+    linear-gradient(300deg, rgba(52, 199, 89, 0.14), transparent 36%),
+    linear-gradient(180deg, #f7f8fb 0%, #eef2f7 48%, #e8edf4 100%);
 }
 
 .onboarding-map {
@@ -76,8 +76,8 @@ button {
   border-radius: 44%;
   transform: rotate(-9deg);
   box-shadow:
-    inset 0 0 0 16px rgba(255, 255, 255, 0.025),
-    0 0 40px rgba(98, 231, 255, 0.12);
+    inset 0 0 0 16px rgba(255, 255, 255, 0.22),
+    0 0 40px rgba(0, 122, 255, 0.12);
 }
 
 .onboarding-map::after {
@@ -85,8 +85,8 @@ button {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    linear-gradient(90deg, rgba(60, 60, 67, 0.055) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(60, 60, 67, 0.045) 1px, transparent 1px);
   background-size: 44px 44px;
   mask-image: radial-gradient(circle at center, black, transparent 72%);
 }
@@ -123,11 +123,11 @@ button {
   padding: 18px;
   display: grid;
   gap: 16px;
-  background: rgba(11, 13, 27, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.74);
   border-radius: var(--radius);
   backdrop-filter: blur(22px);
-  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 28px 72px rgba(31, 35, 45, 0.16);
 }
 
 .auth-kicker,
@@ -156,11 +156,11 @@ button {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--cyan), var(--yellow) 54%, var(--pink));
-  color: #071017;
+  background: linear-gradient(135deg, #ffffff, #dceaff);
+  color: #007aff;
   font-size: 13px;
   font-weight: 950;
-  box-shadow: 0 0 24px rgba(98, 231, 255, 0.32);
+  box-shadow: 0 10px 24px rgba(0, 122, 255, 0.20);
 }
 
 h1,
@@ -217,7 +217,7 @@ label {
   gap: 3px;
   padding: 3px;
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(118, 118, 128, 0.12);
 }
 
 .group-mode button {
@@ -231,8 +231,9 @@ label {
 }
 
 .group-mode button.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: white;
+  background: #ffffff;
+  color: var(--ink);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
 }
 
 .group-hint {
@@ -293,7 +294,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 11px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.82);
   color: var(--ink);
   outline: none;
 }
@@ -368,12 +369,12 @@ textarea {
 .action-button {
   border: 0;
   padding: 0 16px;
-  background: linear-gradient(135deg, var(--cyan), var(--green));
-  color: #061017;
+  background: var(--cyan);
+  color: white;
 }
 
 .action-button.secondary {
-  background: rgba(255, 255, 255, 0.11);
+  background: rgba(118, 118, 128, 0.12);
   color: var(--ink);
   border: 1px solid var(--line);
 }
@@ -407,8 +408,8 @@ textarea {
   display: grid;
   grid-template-rows: auto 1fr auto;
   background:
-    linear-gradient(140deg, rgba(98, 231, 255, 0.10), transparent 40%),
-    linear-gradient(310deg, rgba(255, 91, 215, 0.10), transparent 38%),
+    linear-gradient(140deg, rgba(0, 122, 255, 0.10), transparent 40%),
+    linear-gradient(310deg, rgba(52, 199, 89, 0.10), transparent 38%),
     var(--bg);
 }
 
@@ -422,9 +423,9 @@ textarea {
   justify-content: space-between;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 22px;
   backdrop-filter: blur(18px);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.30);
+  box-shadow: 0 14px 34px rgba(31, 35, 45, 0.14);
 }
 
 .brand {
@@ -462,7 +463,7 @@ textarea {
   display: grid;
   align-content: center;
   gap: 1px;
-  background: rgba(255, 255, 255, 0.10);
+  background: rgba(118, 118, 128, 0.12);
   color: var(--ink);
   text-align: left;
 }
@@ -486,7 +487,7 @@ textarea {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.10);
+  background: rgba(118, 118, 128, 0.12);
   color: var(--ink);
 }
 
@@ -498,7 +499,7 @@ textarea {
 
 .icon-button.primary {
   background: var(--cyan);
-  color: #061017;
+  color: white;
   border-color: transparent;
 }
 
@@ -536,14 +537,14 @@ textarea {
   position: relative;
   width: min(90vw, 38svh, 430px);
   aspect-ratio: 9 / 16;
-  overflow: visible;
+  overflow: hidden;
   isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: var(--radius);
-  background: #080916;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 28px;
+  background: #dfe6ed;
   box-shadow:
-    0 22px 60px rgba(0, 0, 0, 0.36),
-    0 0 44px rgba(98, 231, 255, 0.14);
+    0 22px 60px rgba(31, 35, 45, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .map::before {
@@ -551,15 +552,15 @@ textarea {
   position: absolute;
   inset: -8px;
   z-index: -1;
-  border-radius: var(--radius);
+  border-radius: 32px;
   background:
-    linear-gradient(135deg, rgba(98, 231, 255, 0.20), transparent 34%),
-    linear-gradient(320deg, rgba(255, 91, 215, 0.18), transparent 38%);
-  filter: blur(16px);
+    linear-gradient(135deg, rgba(0, 122, 255, 0.14), transparent 34%),
+    linear-gradient(320deg, rgba(52, 199, 89, 0.16), transparent 38%);
+  filter: blur(12px);
 }
 
-.official-map,
-.map-clarity,
+.map-scene,
+.map-glass,
 .route-layer,
 .stage-layer,
 .pin-layer {
@@ -567,30 +568,134 @@ textarea {
   inset: 0;
 }
 
-.official-map {
+.map-scene {
   z-index: 1;
   overflow: hidden;
-  border-radius: var(--radius);
-  background: #060711;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 15% 18%, rgba(255, 255, 255, 0.9), transparent 16%),
+    linear-gradient(180deg, #edf2f6 0%, #dfe7ef 58%, #d5dde7 100%);
+  perspective: 900px;
 }
 
-.official-map img {
-  display: block;
-  height: 100%;
-  width: auto;
-  max-width: none;
-  filter: saturate(1.14) contrast(1.08) brightness(1.06);
+.map-plane {
+  position: absolute;
+  inset: 7% -18% 8%;
+  transform: rotateX(56deg) rotateZ(-11deg) scale(1.18);
+  transform-origin: 50% 58%;
+  border-radius: 34%;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.46) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.42) 1px, transparent 1px),
+    linear-gradient(135deg, #d7ead9, #e7ecef 44%, #d4e0ec);
+  background-size: 58px 58px, 58px 58px, auto;
+  box-shadow:
+    0 56px 62px rgba(61, 76, 92, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.65);
 }
 
-.map-clarity {
+.map-glass {
   z-index: 2;
   pointer-events: none;
-  border-radius: var(--radius);
+  border-radius: inherit;
   background:
-    linear-gradient(90deg, rgba(6, 7, 17, 0.08), transparent 18%, transparent 84%, rgba(6, 7, 17, 0.18)),
-    radial-gradient(circle at 50% 58%, transparent 0 58%, rgba(6, 7, 17, 0.18) 86%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 22%, transparent 70%, rgba(255, 255, 255, 0.20)),
+    radial-gradient(circle at 50% 58%, transparent 0 64%, rgba(255, 255, 255, 0.28) 90%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.36);
 }
+
+.map-grass,
+.map-road,
+.map-building {
+  position: absolute;
+  display: block;
+}
+
+.map-grass {
+  border-radius: 45%;
+  background: rgba(122, 199, 132, 0.42);
+}
+
+.map-grass.g1 {
+  left: 2%;
+  top: 8%;
+  width: 34%;
+  height: 28%;
+}
+
+.map-grass.g2 {
+  right: 7%;
+  top: 22%;
+  width: 30%;
+  height: 24%;
+}
+
+.map-grass.g3 {
+  left: 14%;
+  bottom: 8%;
+  width: 36%;
+  height: 20%;
+}
+
+.map-road {
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow:
+    inset 0 0 0 2px #cfd6de,
+    0 5px 11px rgba(82, 98, 114, 0.15);
+}
+
+.map-road.freeway {
+  left: -9%;
+  top: 47%;
+  width: 118%;
+  height: 32px;
+  transform: rotate(7deg);
+}
+
+.map-road.main {
+  left: 45%;
+  top: 5%;
+  width: 34px;
+  height: 91%;
+  transform: rotate(-3deg);
+}
+
+.map-road.cross {
+  left: 8%;
+  top: 29%;
+  width: 84%;
+  height: 24px;
+  transform: rotate(-20deg);
+}
+
+.map-road.loop {
+  left: 18%;
+  top: 18%;
+  width: 62%;
+  height: 57%;
+  border: 22px solid #ffffff;
+  background: transparent;
+  box-shadow:
+    inset 0 0 0 2px #cfd6de,
+    0 9px 16px rgba(82, 98, 114, 0.14);
+}
+
+.map-building {
+  width: 54px;
+  height: 38px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f9fbfd, #cdd7e1);
+  box-shadow:
+    0 9px 0 #b9c5d0,
+    0 18px 20px rgba(79, 96, 112, 0.20);
+}
+
+.map-building.b1 { left: 18%; top: 18%; }
+.map-building.b2 { left: 72%; top: 25%; }
+.map-building.b3 { left: 30%; top: 55%; }
+.map-building.b4 { left: 62%; top: 63%; }
+.map-building.b5 { left: 14%; top: 76%; }
 
 .route-layer {
   z-index: 3;
@@ -619,32 +724,37 @@ textarea {
 
 .stage-marker {
   position: absolute;
-  width: 108px;
+  width: 92px;
   transform: translate(-50%, -50%);
   text-align: center;
   pointer-events: none;
 }
 
-.stage-dot {
-  width: 15px;
-  height: 15px;
-  margin: 0 auto 5px;
-  border-radius: 50%;
-  background: var(--stage-color);
-  border: 2px solid rgba(255, 255, 255, 0.82);
+.stage-photo {
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 4px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--stage-art);
+  border: 2px solid #ffffff;
+  color: white;
+  font-size: 9px;
+  font-weight: 950;
   box-shadow:
-    0 0 0 7px color-mix(in srgb, var(--stage-color), transparent 78%),
-    0 0 18px var(--stage-color);
+    0 8px 18px rgba(31, 35, 45, 0.20),
+    0 0 0 5px color-mix(in srgb, var(--stage-color), transparent 78%);
 }
 
 .stage-name {
   display: inline-block;
-  max-width: 108px;
+  max-width: 92px;
   padding: 4px 7px;
   border-radius: 999px;
-  background: rgba(5, 7, 18, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(60, 60, 67, 0.14);
+  color: rgba(17, 17, 20, 0.86);
   font-size: 10px;
   font-weight: 900;
   line-height: 1.15;

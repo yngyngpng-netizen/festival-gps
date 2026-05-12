@@ -1,10 +1,9 @@
-const CACHE_NAME = "festival-gps-v10";
-const MAP_IMAGE_HOST = "d3vhc53cl8e8km.cloudfront.net";
+const CACHE_NAME = "festival-gps-v11";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=20260512-6",
-  "./app.js?v=20260512-6",
+  "./styles.css?v=20260512-7",
+  "./app.js?v=20260512-7",
   "./base44-config.js",
   "./firebase-config.js",
   "./manifest.webmanifest",
@@ -31,7 +30,6 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   const url = new URL(event.request.url);
-  const isFestivalMapImage = url.hostname === MAP_IMAGE_HOST && url.pathname.includes("edclv_2026_de_festival_map");
   const isAppAsset = url.origin === self.location.origin && (
     event.request.mode === "navigate" ||
     url.pathname.endsWith("/") ||
@@ -49,21 +47,6 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match(event.request))
-    );
-    return;
-  }
-
-  if (isFestivalMapImage) {
-    event.respondWith(
-      caches.match(event.request).then((cached) => (
-        fetch(event.request)
-          .then((response) => {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-            return response;
-          })
-          .catch(() => cached)
-      ))
     );
     return;
   }
