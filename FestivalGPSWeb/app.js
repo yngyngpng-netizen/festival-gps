@@ -7,6 +7,7 @@ const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
 const PIN_BUCKET_THRESHOLD = 3;
+const PIN_DRAG_THRESHOLD_PX = 6;
 const EDC_GEO_MARGIN = 0.00035;
 const MAP_PIN_BOUNDS = {
   minX: 0.045,
@@ -239,6 +240,8 @@ let cropState = null;
 let pendingInitialPosition = null;
 let selectedStageId = "";
 let selectedBucketId = "";
+let activePinDrag = null;
+const pinDragOffsets = new Map();
 const artistImageCache = new Map();
 const artistImagePending = new Map();
 let mapkitState = {
@@ -358,6 +361,7 @@ function bindElements() {
     "map",
     "mapExpandButton",
     "mapCloseButton",
+    "expandedFriendList",
     "appleMapLayer",
     "locationButton",
     "scheduleButton",
@@ -531,6 +535,9 @@ function bindEvents() {
       setMapExpanded(false);
     }
   });
+  window.addEventListener("pointermove", handlePinDragMove, { passive: false });
+  window.addEventListener("pointerup", finishPinDrag);
+  window.addEventListener("pointercancel", finishPinDrag);
   window.addEventListener("resize", syncMapOverlays);
 }
 
@@ -1011,10 +1018,13 @@ async function switchGroup() {
   requestAnimationFrame(() => els.authGroupCode.focus());
 }
 
-function toggleLiveLocation() {
+async function toggleLiveLocation() {
   if (locationSharing) {
+    const confirmed = window.confirm("Stop sharing live location with friends?");
+    if (!confirmed) return;
     currentLocationMode = false;
     stopLiveLocation();
+    await clearOwnLiveLocation({ persist: true });
     renderAll();
     return;
   }
@@ -1351,6 +1361,7 @@ function renderAll() {
   renderPins();
   renderFriendStrip();
   renderSelectedFriendSummary();
+  renderExpandedFriendList();
   if (els.profileDialog.open) renderFriendList(els.profileFriendList, { closeDialog: null, management: true });
   if (els.friendDetailDialog.open) renderFriendDetail();
   if (els.bucketDialog.open) renderBucketDetail();
@@ -1358,7 +1369,7 @@ function renderAll() {
 }
 
 function handleMapClick(event) {
-  if (event.target.closest(".friend-pin, .bucket-pin, .stage-marker, .map-expand-button, .map-close-button")) return;
+  if (event.target.closest(".friend-pin, .bucket-pin, .stage-marker, .map-expand-button, .map-close-button, .expanded-friend-list")) return;
   if (!els.map.classList.contains("expanded")) {
     setMapExpanded(true);
   }
@@ -1523,34 +1534,38 @@ function refreshStagePhoto(photo, stage, now) {
   const artist = now?.artist || "";
   photo.classList.toggle("artist-active", Boolean(artist));
   photo.title = artist;
-  photo.style.setProperty("--stage-art", artist ? artistGradient(artist, stage.color) : stage.art);
+  refreshArtistPhoto(photo, artist, stage, stage.short || "");
+}
+
+function refreshArtistPhoto(container, artist, stage, fallbackText = "") {
+  container.style.setProperty("--stage-art", artist ? artistGradient(artist, stage.color) : stage.art);
 
   if (!artist) {
-    photo.dataset.artist = "";
-    photo.dataset.image = "";
-    if (photo.textContent !== stage.short || photo.children.length) photo.replaceChildren(stage.short || "");
+    container.dataset.artist = "";
+    container.dataset.image = "";
+    if (container.textContent !== fallbackText || container.children.length) container.replaceChildren(fallbackText);
     return;
   }
 
   requestArtistImage(artist);
   const imageUrl = artistImageUrl(artist);
-  let image = photo.querySelector("img");
+  let image = container.querySelector("img");
 
   if (!image) {
-    photo.replaceChildren();
+    container.replaceChildren();
     image = document.createElement("img");
     image.loading = "lazy";
     image.addEventListener("error", () => {
       image.hidden = true;
     });
-    photo.append(image);
+    container.append(image);
   }
 
   image.hidden = false;
   image.alt = artist;
-  if (photo.dataset.artist !== artist || photo.dataset.image !== imageUrl) {
-    photo.dataset.artist = artist;
-    photo.dataset.image = imageUrl;
+  if (container.dataset.artist !== artist || container.dataset.image !== imageUrl) {
+    container.dataset.artist = artist;
+    container.dataset.image = imageUrl;
     image.src = imageUrl;
   }
 }
@@ -1662,6 +1677,7 @@ function renderPins() {
   layout.singles.forEach(({ friend, position, grid }) => {
     const previous = lastPinPositions.get(friend.id);
     const isMoving = Boolean(previous && Math.hypot(previous.x - position.x, previous.y - position.y) > 0.01);
+    const dragKey = `friend:${friend.id}`;
     let pin = els.pinLayer.querySelector(`[data-friend-id="${cssEscape(friend.id)}"]`);
     const isNew = !pin;
 
@@ -1672,14 +1688,21 @@ function renderPins() {
       pin.dataset.friendId = friend.id;
       pin.addEventListener("click", (event) => {
         event.stopPropagation();
+        if (pin._suppressClick) {
+          event.preventDefault();
+          return;
+        }
         selectedFriendId = friend.id;
         renderAll();
         renderFriendDetail(friend);
         openDialog(els.friendDetailDialog);
       });
+      bindPinDrag(pin);
       els.pinLayer.append(pin);
     }
 
+    pin.dataset.pinKey = dragKey;
+    pin._basePosition = position;
     pin.classList.toggle("selected", friend.id === selectedFriendId);
     const friendGrid = grid || gridForFriend(friend, position);
     pin.classList.toggle("live", currentLocationMode && Boolean(liveLocationForFriend(friend)));
@@ -1706,15 +1729,13 @@ function renderPins() {
 
     if (isNew) {
       const start = previous || position;
-      pin.style.left = `${start.x * 100}%`;
-      pin.style.top = `${start.y * 100}%`;
+      setPinElementPosition(pin, visualPositionForPin(dragKey, start));
       if (previous) {
         pin.classList.add("walking");
         window.clearTimeout(pin._walkTimer);
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
         requestAnimationFrame(() => {
-          pin.style.left = `${position.x * 100}%`;
-          pin.style.top = `${position.y * 100}%`;
+          setPinElementPosition(pin, visualPositionForPin(dragKey, position));
         });
       }
     } else {
@@ -1724,8 +1745,7 @@ function renderPins() {
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
       }
       requestAnimationFrame(() => {
-        pin.style.left = `${position.x * 100}%`;
-        pin.style.top = `${position.y * 100}%`;
+        setPinElementPosition(pin, visualPositionForPin(dragKey, position));
       });
     }
 
@@ -1746,14 +1766,21 @@ function renderPins() {
       pin.dataset.bucketId = bucket.id;
       pin.addEventListener("click", (event) => {
         event.stopPropagation();
+        if (pin._suppressClick) {
+          event.preventDefault();
+          return;
+        }
         const currentBucket = pin._bucketData || bucket;
         selectedBucketId = currentBucket.id;
         renderBucketDetail(currentBucket);
         openDialog(els.bucketDialog);
       });
+      bindPinDrag(pin);
       els.pinLayer.append(pin);
     }
 
+    pin.dataset.pinKey = key;
+    pin._basePosition = bucket.position;
     pin._bucketData = bucket;
     pin.classList.toggle("selected", bucket.friends.some((friend) => friend.id === selectedFriendId));
     pin.style.setProperty("--bucket-color", bucket.friends[0]?.color || "#53e2ff");
@@ -1793,15 +1820,13 @@ function renderPins() {
 
     if (isNew) {
       const start = previous || bucket.position;
-      pin.style.left = `${start.x * 100}%`;
-      pin.style.top = `${start.y * 100}%`;
+      setPinElementPosition(pin, visualPositionForPin(key, start));
       if (previous) {
         pin.classList.add("walking");
         window.clearTimeout(pin._walkTimer);
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
         requestAnimationFrame(() => {
-          pin.style.left = `${bucket.position.x * 100}%`;
-          pin.style.top = `${bucket.position.y * 100}%`;
+          setPinElementPosition(pin, visualPositionForPin(key, bucket.position));
         });
       }
     } else {
@@ -1811,8 +1836,7 @@ function renderPins() {
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
       }
       requestAnimationFrame(() => {
-        pin.style.left = `${bucket.position.x * 100}%`;
-        pin.style.top = `${bucket.position.y * 100}%`;
+        setPinElementPosition(pin, visualPositionForPin(key, bucket.position));
       });
     }
 
@@ -1828,6 +1852,101 @@ function previousBucketPosition(bucket) {
     .map((friend) => lastPinPositions.get(friend.id))
     .filter(Boolean);
   return positions.length ? averagePosition(positions) : null;
+}
+
+function bindPinDrag(pin) {
+  pin.addEventListener("pointerdown", startPinDrag);
+}
+
+function startPinDrag(event) {
+  if (event.button !== undefined && event.button !== 0) return;
+
+  const pin = event.currentTarget;
+  const key = pin.dataset.pinKey;
+  if (!key) return;
+
+  activePinDrag = {
+    pin,
+    key,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startOffset: pinDragOffsets.get(key) || { x: 0, y: 0 },
+    basePosition: pin._basePosition || positionFromPinElement(pin),
+    moved: false
+  };
+  pin.classList.add("drag-ready");
+  pin.setPointerCapture?.(event.pointerId);
+}
+
+function handlePinDragMove(event) {
+  if (!activePinDrag || event.pointerId !== activePinDrag.pointerId) return;
+
+  const rect = els.pinLayer.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  const dxPixels = event.clientX - activePinDrag.startX;
+  const dyPixels = event.clientY - activePinDrag.startY;
+  const movedEnough = Math.hypot(dxPixels, dyPixels) >= PIN_DRAG_THRESHOLD_PX;
+  if (!activePinDrag.moved && !movedEnough) return;
+
+  activePinDrag.moved = true;
+  activePinDrag.pin.classList.add("dragging");
+  activePinDrag.pin.classList.remove("walking");
+  window.clearTimeout(activePinDrag.pin._walkTimer);
+
+  const nextOffset = {
+    x: activePinDrag.startOffset.x + dxPixels / rect.width,
+    y: activePinDrag.startOffset.y + dyPixels / rect.height
+  };
+  const nextPosition = clampMapPosition({
+    x: activePinDrag.basePosition.x + nextOffset.x,
+    y: activePinDrag.basePosition.y + nextOffset.y
+  });
+  const clampedOffset = {
+    x: nextPosition.x - activePinDrag.basePosition.x,
+    y: nextPosition.y - activePinDrag.basePosition.y
+  };
+
+  pinDragOffsets.set(activePinDrag.key, clampedOffset);
+  setPinElementPosition(activePinDrag.pin, nextPosition);
+  event.preventDefault();
+}
+
+function finishPinDrag(event) {
+  if (!activePinDrag || event.pointerId !== activePinDrag.pointerId) return;
+
+  const { pin, moved, pointerId } = activePinDrag;
+  pin.classList.remove("drag-ready", "dragging");
+  pin.releasePointerCapture?.(pointerId);
+  if (moved) {
+    pin._suppressClick = true;
+    window.setTimeout(() => {
+      pin._suppressClick = false;
+    }, 220);
+  }
+  activePinDrag = null;
+}
+
+function visualPositionForPin(key, position) {
+  const offset = pinDragOffsets.get(key);
+  if (!offset) return position;
+  return clampMapPosition({
+    x: position.x + offset.x,
+    y: position.y + offset.y
+  });
+}
+
+function setPinElementPosition(pin, position) {
+  pin.style.left = `${position.x * 100}%`;
+  pin.style.top = `${position.y * 100}%`;
+}
+
+function positionFromPinElement(pin) {
+  return clampMapPosition({
+    x: Number.parseFloat(pin.style.left) / 100 || stageById("speedway-entry").x,
+    y: Number.parseFloat(pin.style.top) / 100 || stageById("speedway-entry").y
+  });
 }
 
 function renderFriendStrip() {
@@ -2034,81 +2153,116 @@ function renderStageDetail(stage = null) {
   const artist = currentSummary?.artist || "";
 
   els.stageDetailName.textContent = currentStage.name;
-  els.stageDetailPhoto.style.setProperty("--stage-art", artist ? artistGradient(artist, currentStage.color) : currentStage.art);
-  els.stageDetailPhoto.replaceChildren();
-  if (artist) {
-    requestArtistImage(artist);
-    const image = document.createElement("img");
-    image.src = artistImageUrl(artist);
-    image.alt = artist;
-    image.loading = "lazy";
-    image.addEventListener("error", () => image.remove(), { once: true });
-    els.stageDetailPhoto.append(image);
-  } else {
-    els.stageDetailPhoto.textContent = currentStage.short || "";
-  }
+  refreshArtistPhoto(els.stageDetailPhoto, artist, currentStage, currentStage.short || "");
 
   els.stageDetailArtist.textContent = artist || "No official set at this time";
   els.stageDetailTime.textContent = currentSet
     ? `${formatTime(currentSet.start)} to ${formatTime(currentSet.end)} on ${days[currentSet.day].label}`
     : `${days[state.selectedDay].label} ${formatTime(state.selectedMinute)}`;
-  els.stageDetailSchedule.replaceChildren();
 
   const sets = officialSetTimes()
     .filter((item) => item.day === state.selectedDay && item.stageId === currentStage.id)
     .sort((a, b) => a.start - b.start);
+  const activeIds = new Set(sets.map((item) => item.id));
+
+  [...els.stageDetailSchedule.children].forEach((row) => {
+    if (row.dataset.empty === "true" || !activeIds.has(row.dataset.setId)) row.remove();
+  });
 
   if (!sets.length) {
-    const empty = document.createElement("p");
-    empty.className = "friend-schedule-empty";
+    let empty = els.stageDetailSchedule.querySelector("[data-empty='true']");
+    if (!empty) {
+      empty = document.createElement("p");
+      empty.className = "friend-schedule-empty";
+      empty.dataset.empty = "true";
+      els.stageDetailSchedule.append(empty);
+    }
     empty.textContent = "No official timeline loaded for this stage.";
-    els.stageDetailSchedule.append(empty);
     return;
   }
 
   sets.forEach((item) => {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "stage-set-row";
+    let row = els.stageDetailSchedule.querySelector(`[data-set-id="${cssEscape(item.id)}"]`);
+
+    if (!row) {
+      row = document.createElement("button");
+      row.type = "button";
+      row.className = "stage-set-row";
+      row.dataset.setId = item.id;
+      row.addEventListener("click", () => {
+        state.selectedDay = item.day;
+        state.selectedMinute = item.start;
+        timelineFollowsClock = false;
+        currentLocationMode = false;
+        saveLocalStore();
+        renderAll();
+      });
+
+      const thumb = document.createElement("span");
+      thumb.className = "stage-set-thumb";
+      const copy = document.createElement("span");
+      copy.className = "chip-copy";
+      const name = document.createElement("span");
+      name.className = "chip-name";
+      const meta = document.createElement("span");
+      meta.className = "chip-status";
+      copy.append(name, meta);
+      row.append(thumb, copy);
+    }
+
     row.classList.toggle("active", item.start <= state.selectedMinute && state.selectedMinute <= item.end);
-    row.addEventListener("click", () => {
-      state.selectedDay = item.day;
-      state.selectedMinute = item.start;
-      timelineFollowsClock = false;
-      currentLocationMode = false;
-      saveLocalStore();
-      renderAll();
-    });
-
-    const thumb = document.createElement("span");
-    thumb.className = "stage-set-thumb";
-    thumb.style.setProperty("--stage-art", artistGradient(item.artist, currentStage.color));
-    requestArtistImage(item.artist);
-    const image = document.createElement("img");
-    image.src = artistImageUrl(item.artist);
-    image.alt = item.artist;
-    image.loading = "lazy";
-    image.addEventListener("error", () => image.remove(), { once: true });
-    thumb.append(image);
-
-    const copy = document.createElement("span");
-    copy.className = "chip-copy";
-    const name = document.createElement("span");
-    name.className = "chip-name";
-    name.textContent = item.artist;
-    const meta = document.createElement("span");
-    meta.className = "chip-status";
-    meta.textContent = `${formatTime(item.start)} to ${formatTime(item.end)}`;
-    copy.append(name, meta);
-    row.append(thumb, copy);
+    row.querySelector(".chip-name").textContent = item.artist;
+    row.querySelector(".chip-status").textContent = `${formatTime(item.start)} to ${formatTime(item.end)}`;
+    refreshArtistPhoto(row.querySelector(".stage-set-thumb"), item.artist, currentStage, currentStage.short || "");
     els.stageDetailSchedule.append(row);
   });
 }
 
 function renderSelectedFriendSummary() {
   const selected = selectedFriend();
-  els.selectedFriendName.textContent = selected.name || "Your crew";
-  els.selectedFriendStage.textContent = `${nextStopText(selected)} · Grid ${gridForFriend(selected)}`;
+  const grid = gridForFriend(selected);
+  els.selectedFriendName.replaceChildren(
+    document.createTextNode(selected.name || "Your crew"),
+    gridBadgeElement(grid, "now-grid")
+  );
+  els.selectedFriendStage.textContent = nextStopText(selected);
+}
+
+function renderExpandedFriendList() {
+  if (!els.expandedFriendList) return;
+
+  els.expandedFriendList.replaceChildren();
+  const title = document.createElement("strong");
+  title.className = "expanded-friend-title";
+  title.textContent = "Crew grid";
+  els.expandedFriendList.append(title);
+
+  state.friends.forEach((friend) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "expanded-friend-row";
+    row.classList.toggle("active", friend.id === selectedFriendId);
+    row.style.setProperty("--friend-color", friend.color || "#53e2ff");
+    row.addEventListener("click", () => {
+      selectedFriendId = friend.id;
+      renderAll();
+      renderFriendDetail(friend);
+      openDialog(els.friendDetailDialog);
+    });
+
+    const name = document.createElement("span");
+    name.className = "expanded-friend-name";
+    name.textContent = friend.name || "Friend";
+    row.append(name, gridBadgeElement(gridForFriend(friend), "expanded-grid-badge"));
+    els.expandedFriendList.append(row);
+  });
+}
+
+function gridBadgeElement(grid, className) {
+  const badge = document.createElement("span");
+  badge.className = className;
+  badge.textContent = grid;
+  return badge;
 }
 
 function nextStopText(friend) {
