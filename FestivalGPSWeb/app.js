@@ -2114,7 +2114,7 @@ function cleanArtist(value) {
 
 function stageForFriend(friend) {
   if (currentLocationMode) {
-    const mapped = mappedLocationForFriend(friend);
+    const mapped = locationOverrideForFriend(friend);
     if (mapped?.stageId) return stageById(mapped.stageId);
   }
 
@@ -2130,7 +2130,9 @@ function stageForFriend(friend) {
 }
 
 function activeEvent(friend) {
-  return friend.schedule.find((item) => item.day === state.selectedDay && item.start <= state.selectedMinute && state.selectedMinute <= item.end);
+  return friend.schedule
+    .filter((item) => item.day === state.selectedDay && item.start <= state.selectedMinute && state.selectedMinute <= item.end)
+    .sort((a, b) => b.start - a.start || a.end - b.end)[0];
 }
 
 function displayEvent(friend) {
@@ -2146,7 +2148,7 @@ function statusText(friend) {
     if (live) return `Live GPS: ${stageById(live.stageId).name}`;
 
     const lastKnown = lastKnownLocationForFriend(friend);
-    if (lastKnown) return `Last seen: ${stageById(lastKnown.stageId).name}`;
+    if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) return `Last seen: ${stageById(lastKnown.stageId).name}`;
   }
 
   const active = activeEvent(friend);
@@ -2168,7 +2170,8 @@ function locationSourceText(friend) {
     const live = liveLocationForFriend(friend);
     const lastKnown = lastKnownLocationForFriend(friend);
     if (live) return `${selectedIsSelf ? "Your" : "Friend"} live GPS ${relativeAge(live.updatedAt)}`;
-    if (lastKnown) return `${navigator.onLine ? "Last GPS" : "Offline last seen"} ${relativeAge(lastKnown.updatedAt)}`;
+    if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) return `${navigator.onLine ? "Last GPS" : "Offline last seen"} ${relativeAge(lastKnown.updatedAt)}`;
+    if (lastKnown) return "Schedule after last GPS";
   }
 
   if (selectedIsSelf && lastLocationProblem) return lastLocationProblem;
@@ -2200,7 +2203,7 @@ function offsetPosition(friend, stage, groups) {
 
 function positionForFriend(friend, stage, groups) {
   if (currentLocationMode) {
-    const mapped = mappedLocationForFriend(friend);
+    const mapped = locationOverrideForFriend(friend);
     if (mapped) {
       return clampMapPosition(screenPositionForLiveLocation(mapped));
     }
@@ -2261,14 +2264,49 @@ function liveLocationForFriend(friend) {
   return live;
 }
 
-function mappedLocationForFriend(friend) {
-  return liveLocationForFriend(friend) || lastKnownLocationForFriend(friend);
+function locationOverrideForFriend(friend) {
+  const live = liveLocationForFriend(friend);
+  if (live) return live;
+
+  const lastKnown = lastKnownLocationForFriend(friend);
+  if (!lastKnown) return null;
+  return scheduleSupersedesLastLocation(friend, lastKnown) ? null : lastKnown;
 }
 
 function lastKnownLocationForFriend(friend) {
   const live = normalizeLiveLocation(friend?.liveLocation);
   if (!live?.insideFestival) return null;
   return live;
+}
+
+function scheduleSupersedesLastLocation(friend, lastKnown) {
+  const active = activeEvent(friend);
+  if (!active) return false;
+
+  const lastUpdated = Date.parse(lastKnown.updatedAt);
+  const activeStart = eventStartDate(active)?.getTime();
+  const selectedMoment = selectedMomentDate()?.getTime();
+  if (![lastUpdated, activeStart, selectedMoment].every(Number.isFinite)) return false;
+
+  return selectedMoment >= activeStart && lastUpdated < activeStart;
+}
+
+function selectedMomentDate() {
+  const day = days[state.selectedDay] ? state.selectedDay : "friday";
+  return festivalMinuteDate(day, state.selectedMinute);
+}
+
+function eventStartDate(event) {
+  if (!event?.day || !days[event.day]) return null;
+  return festivalMinuteDate(event.day, event.start);
+}
+
+function festivalMinuteDate(day, minute) {
+  const windowStart = festivalWindows[day]?.start;
+  if (!windowStart || !Number.isFinite(Number(minute))) return null;
+  const midnight = new Date(windowStart);
+  midnight.setHours(0, 0, 0, 0);
+  return new Date(midnight.getTime() + Number(minute) * 60 * 1000);
 }
 
 function normalizeLiveLocation(value) {
