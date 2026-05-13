@@ -221,8 +221,6 @@ function bindElements() {
     "photoCropDialog",
     "photoCropCanvas",
     "photoCropZoom",
-    "photoCropX",
-    "photoCropY",
     "photoCropApply",
     "photoCropCancel",
     "scheduleDialog",
@@ -308,9 +306,7 @@ function bindEvents() {
     }
   });
 
-  [els.photoCropZoom, els.photoCropX, els.photoCropY].forEach((control) => {
-    control.addEventListener("input", drawPhotoCropPreview);
-  });
+  els.photoCropZoom.addEventListener("input", drawPhotoCropPreview);
   els.photoCropApply.addEventListener("click", applyPhotoCrop);
   els.photoCropCancel.addEventListener("click", cancelPhotoCrop);
   els.photoCropDialog.addEventListener("cancel", (event) => {
@@ -2530,8 +2526,6 @@ async function openPhotoCropper(file, target) {
       resolve
     };
     els.photoCropZoom.value = "1";
-    els.photoCropX.value = "0";
-    els.photoCropY.value = "0";
     drawPhotoCropPreview();
     openDialog(els.photoCropDialog);
   });
@@ -2546,29 +2540,29 @@ function drawPhotoCropPreview() {
   const crop = cropRectangle(cropState.image);
 
   context.clearRect(0, 0, size, size);
-  context.fillStyle = "#eef1f5";
+  context.fillStyle = "#f2f3f7";
   context.fillRect(0, 0, size, size);
 
   context.save();
   context.beginPath();
-  context.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
+  context.arc(size / 2, size / 2, size * 0.465, 0, Math.PI * 2);
   context.clip();
   context.drawImage(cropState.image, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size);
   context.restore();
 
   context.save();
-  context.fillStyle = "rgba(17, 17, 20, 0.18)";
+  context.fillStyle = "rgba(17, 17, 20, 0.16)";
   context.fillRect(0, 0, size, size);
   context.globalCompositeOperation = "destination-out";
   context.beginPath();
-  context.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
+  context.arc(size / 2, size / 2, size * 0.465, 0, Math.PI * 2);
   context.fill();
   context.restore();
 
-  context.lineWidth = 4;
+  context.lineWidth = 5;
   context.strokeStyle = "rgba(255, 255, 255, 0.94)";
   context.beginPath();
-  context.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
+  context.arc(size / 2, size / 2, size * 0.465, 0, Math.PI * 2);
   context.stroke();
 }
 
@@ -2577,24 +2571,22 @@ function cropRectangle(image) {
   const baseSize = Math.min(image.width, image.height) / zoom;
   const maxX = Math.max(0, image.width - baseSize);
   const maxY = Math.max(0, image.height - baseSize);
-  const offsetX = Number(els.photoCropX.value) || 0;
-  const offsetY = Number(els.photoCropY.value) || 0;
 
   return {
-    x: clamp((maxX / 2) + offsetX * (maxX / 2), 0, maxX),
-    y: clamp((maxY / 2) + offsetY * (maxY / 2), 0, maxY),
+    x: maxX / 2,
+    y: maxY / 2,
     size: baseSize
   };
 }
 
 function croppedPhotoDataUrl() {
   const output = document.createElement("canvas");
-  output.width = 720;
-  output.height = 720;
+  output.width = 320;
+  output.height = 320;
   const context = output.getContext("2d");
   const crop = cropRectangle(cropState.image);
   context.drawImage(cropState.image, crop.x, crop.y, crop.size, crop.size, 0, 0, output.width, output.height);
-  return output.toDataURL("image/jpeg", 0.88);
+  return output.toDataURL("image/jpeg", 0.82);
 }
 
 function applyPhotoCrop() {
