@@ -1,51 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="70" y1="32" x2="442" y2="480" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#070716"/>
-      <stop offset="0.48" stop-color="#15102c"/>
-      <stop offset="1" stop-color="#050608"/>
-    </linearGradient>
-    <linearGradient id="neon" x1="104" y1="118" x2="410" y2="402" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#00f0ff"/>
-      <stop offset="0.45" stop-color="#ff2bd6"/>
-      <stop offset="1" stop-color="#ffeb00"/>
-    </linearGradient>
-    <linearGradient id="personA" x1="126" y1="148" x2="246" y2="388" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#00f0ff"/>
-      <stop offset="1" stop-color="#59ffb7"/>
-    </linearGradient>
-    <linearGradient id="personB" x1="266" y1="148" x2="386" y2="388" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ff2bd6"/>
-      <stop offset="1" stop-color="#ffeb00"/>
-    </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="8" result="blur"/>
-      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0 0 0 0 0 0.94 0 0 0 0 1 0 0 0 0.65 0" result="cyanGlow"/>
-      <feMerge>
-        <feMergeNode in="cyanGlow"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Festival Buddy">
+  <rect width="512" height="512" fill="#000000"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="186" cy="154" r="48" fill="#000000" stroke-width="26"/>
+    <path d="M186 218v112" stroke-width="30"/>
+    <path d="M186 256 128 306" stroke-width="28"/>
+    <path d="M186 256c28 24 58 36 86 36" stroke-width="28"/>
+    <path d="M186 330 132 414" stroke-width="30"/>
+    <path d="M186 330 232 414" stroke-width="30"/>
 
-  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
-  <path d="M86 108h340M56 256h400M86 404h340M108 70v372M256 48v416M404 70v372" fill="none" stroke="#ffffff" stroke-width="3" opacity="0.08"/>
-  <path d="M74 368 226 88h210L286 424H74Z" fill="#00f0ff" opacity="0.07"/>
-  <path d="M92 116h328v280H92Z" fill="none" stroke="url(#neon)" stroke-width="10" opacity="0.92"/>
-  <path d="M118 142h276v228H118Z" fill="none" stroke="#ffffff" stroke-width="3" opacity="0.22"/>
-  <path d="M92 116h92M328 396h92M420 116v92M92 304v92" fill="none" stroke="#ffeb00" stroke-width="16" stroke-linecap="square"/>
-
-  <g filter="url(#glow)" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="188" cy="176" r="38" fill="#071017" stroke="url(#personA)" stroke-width="18"/>
-    <path d="M188 226v92M188 266l-62 52M188 266l70 24M188 318l-48 66M188 318l42 66" fill="none" stroke="url(#personA)" stroke-width="24"/>
-
-    <circle cx="324" cy="176" r="38" fill="#071017" stroke="url(#personB)" stroke-width="18"/>
-    <path d="M324 226v92M324 266l62 52M324 266l-66 24M324 318l48 66M324 318l-42 66" fill="none" stroke="url(#personB)" stroke-width="24"/>
-
-    <path d="M258 290c-18 8-32 8-48 0" fill="none" stroke="#ffffff" stroke-width="14" opacity="0.96"/>
+    <circle cx="326" cy="154" r="48" fill="#000000" stroke-width="26"/>
+    <path d="M326 218v112" stroke-width="30"/>
+    <path d="M326 256 384 306" stroke-width="28"/>
+    <path d="M326 256c-28 24-58 36-86 36" stroke-width="28"/>
+    <path d="M326 330 380 414" stroke-width="30"/>
+    <path d="M326 330 280 414" stroke-width="30"/>
   </g>
 
-  <circle cx="256" cy="256" r="190" fill="none" stroke="#00f0ff" stroke-width="5" opacity="0.45"/>
-  <circle cx="256" cy="256" r="154" fill="none" stroke="#ff2bd6" stroke-width="4" opacity="0.34"/>
-  <path d="M145 94c32-24 72-38 111-38 110 0 200 90 200 200 0 40-12 78-33 110" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" opacity="0.26"/>
+  <path d="M242 292c9 8 19 8 28 0" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round"/>
 </svg>
