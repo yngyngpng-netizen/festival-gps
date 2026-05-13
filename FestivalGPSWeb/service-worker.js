@@ -1,17 +1,17 @@
-const CACHE_NAME = "festival-gps-v58";
+const CACHE_NAME = "festival-gps-v59";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=20260513-23",
-  "./app.js?v=20260513-23",
+  "./styles.css?v=20260513-24",
+  "./app.js?v=20260513-24",
   "./base44-config.js",
   "./firebase-config.js",
-  "./manifest.webmanifest?v=20260513-23",
+  "./manifest.webmanifest?v=20260513-24",
   "./assets/edc-grid-map.jpg?v=20260513-1",
-  "./assets/icon.svg?v=20260513-23",
-  "./assets/apple-touch-icon.png?v=20260513-23",
-  "./assets/icon-192.png?v=20260513-23",
-  "./assets/icon-512.png?v=20260513-23"
+  "./assets/icon.svg?v=20260513-24",
+  "./assets/apple-touch-icon.png?v=20260513-24",
+  "./assets/icon-192.png?v=20260513-24",
+  "./assets/icon-512.png?v=20260513-24"
 ];
 
 self.addEventListener("install", (event) => {

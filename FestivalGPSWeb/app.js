@@ -8,6 +8,7 @@ const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
+const MAX_OFFLINE_PHOTO_CHARS = 220000;
 const PIN_BUCKET_THRESHOLD = 3;
 const PIN_DRAG_THRESHOLD_PX = 6;
 const MAX_GROUP_MEMBERS = 20;
@@ -280,6 +281,7 @@ async function init() {
   await initCloud();
   if (!state.user) hydrateLocalSession({ allowCloudFallback: true });
   renderAuthGate();
+  syncCloudAfterCachedRestore();
 }
 
 function hideBase44EditBadge() {
@@ -548,6 +550,7 @@ function bindEvents() {
     if (state.user?.id && localStore.shareLocation && !locationSharing) {
       startLiveLocation({ quiet: true });
     }
+    syncCloudAfterCachedRestore();
     syncPendingLiveLocation();
     renderAll();
   });
@@ -944,7 +947,9 @@ function applyCrewMemberUpdate(member) {
 async function refreshBase44Group(groupCode) {
   try {
     const records = await services.base44.entities.CrewMember.filter({ groupCode });
-    const allMembers = records.map((record) => normalizeMember(record));
+    const allMembers = records
+      .map((record) => normalizeMember(record))
+      .map((member) => memberWithRecoveredPhoto(member, groupCode));
     const removedCurrent = allMembers.find((friend) => (
       isRemovedMember(friend) &&
       (friend.id === state.user?.id || (friend.userId && friend.userId === state.user?.userId))
@@ -967,6 +972,13 @@ async function refreshBase44Group(groupCode) {
   } catch (error) {
     els.authMessage.textContent = error.message || String(error);
   }
+}
+
+function syncCloudAfterCachedRestore() {
+  if (!state.user?.id || !state.groupCode) return;
+  if (services.provider !== "base44" || !services.base44 || !navigator.onLine) return;
+  if (services.unsubscribeGroup) return;
+  subscribeToBase44Group(state.groupCode).catch(() => {});
 }
 
 async function enterLocalGroupByName(profile, groupCode, pin, options = {}) {
@@ -1078,6 +1090,14 @@ async function persistCurrentMember(options = {}) {
       groupCode: state.groupCode,
       userId: user.userId || user.id
     });
+    if (options.updateProfile === false) {
+      const recoveredPhoto = findCachedMemberPhoto(user, state.groupCode);
+      if (recoveredPhoto) {
+        updated.photo = recoveredPhoto;
+      } else if (!user.photo) {
+        delete updated.photo;
+      }
+    }
     const saved = await services.base44.entities.CrewMember.update(user.id, updated);
     state.user = normalizeMember(saved);
     applyCrewMemberUpdate(state.user);
@@ -1619,11 +1639,12 @@ async function savedGroupSearchGroups() {
     const records = await services.base44.entities.CrewMember.filter({});
     records
       .map((record) => normalizeMember(record))
+      .map((member) => memberWithRecoveredPhoto(member, member.groupCode))
       .filter((member) => member.groupCode && !isRemovedMember(member))
       .forEach((member) => {
         const code = normalizeGroupCode(member.groupCode);
         const group = groups.get(code) || { code, members: {} };
-        group.members[member.id] = member;
+        group.members[member.id] = mergeMemberKeepingPhoto(group.members[member.id], member);
         groups.set(code, group);
       });
   } catch {
@@ -4032,7 +4053,7 @@ function avatarElement(friend, className) {
 function refreshAvatarElement(avatar, friend) {
   const displayFriend = friendWithDisplayName(friend);
   avatar.style.setProperty("--friend-color", displayFriend.color || "#53e2ff");
-  const nextPhoto = navigator.onLine ? displayFriend.photo || "" : "";
+  const nextPhoto = displayFriend.photo || "";
   const nextInitials = initials(displayFriend.name);
   if (avatar.dataset.photo === nextPhoto && avatar.dataset.initials === nextInitials) return;
 
@@ -4044,6 +4065,10 @@ function refreshAvatarElement(avatar, friend) {
     const image = document.createElement("img");
     image.src = nextPhoto;
     image.alt = "";
+    image.addEventListener("error", () => {
+      avatar.dataset.photo = "";
+      avatar.replaceChildren(nextInitials);
+    }, { once: true });
     avatar.append(image);
   } else {
     avatar.textContent = nextInitials;
@@ -4248,7 +4273,7 @@ function leanLocalStore(store) {
     Object.entries(group.members || {}).forEach(([id, member]) => {
       members[id] = {
         ...member,
-        photo: ""
+        photo: offlinePhotoValue(member.photo)
       };
     });
     groups[code] = {
@@ -4335,6 +4360,42 @@ function normalizeCachedGroup(groupCode, group) {
   return { code, members };
 }
 
+function mergeMemberKeepingPhoto(existing, next) {
+  if (!existing) return next;
+  return {
+    ...existing,
+    ...next,
+    photo: next.photo || existing.photo || ""
+  };
+}
+
+function memberWithRecoveredPhoto(member, groupCode = state.groupCode) {
+  if (member?.photo) return member;
+  const photo = findCachedMemberPhoto(member, groupCode);
+  return photo ? { ...member, photo } : member;
+}
+
+function findCachedMemberPhoto(member, groupCode = state.groupCode) {
+  if (member?.photo) return member.photo;
+  const code = normalizeGroupCode(groupCode || member?.groupCode || "");
+  const candidates = [
+    state.user,
+    ...state.friends,
+    ...Object.values(localStore.groups?.[code]?.members || {}),
+    ...Object.values(readGroupBackup(code)?.members || {})
+  ].filter(Boolean);
+
+  const match = candidates.find((candidate) => (
+    candidate.photo &&
+    (
+      candidate.id === member?.id ||
+      (candidate.userId && candidate.userId === member?.userId) ||
+      (candidate.name && member?.name && sameName(candidate.name, member.name))
+    )
+  ));
+  return match?.photo || "";
+}
+
 function persistOfflineSessionBackup(session, group) {
   const normalized = normalizeSession(session);
   if (!normalized) return;
@@ -4394,8 +4455,9 @@ function compactOfflineGroup(groupCode, group) {
 }
 
 function offlinePhotoValue(photo) {
-  if (!photo || String(photo).startsWith("data:")) return "";
-  return photo;
+  const value = String(photo || "");
+  if (!value) return "";
+  return value.length <= MAX_OFFLINE_PHOTO_CHARS ? value : "";
 }
 
 function clearOfflineSessionBackup() {
