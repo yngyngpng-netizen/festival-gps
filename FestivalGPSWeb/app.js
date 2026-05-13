@@ -179,6 +179,8 @@ function bindElements() {
     "crewProfileButton",
     "groupCodeLabel",
     "map",
+    "mapExpandButton",
+    "mapCloseButton",
     "appleMapLayer",
     "locationButton",
     "scheduleButton",
@@ -261,6 +263,15 @@ function bindEvents() {
   els.copyCodeButton.addEventListener("click", copyGroupCode);
   els.crewProfileButton.addEventListener("click", openProfileSheet);
   els.locationButton.addEventListener("click", toggleLiveLocation);
+  els.map.addEventListener("click", handleMapClick);
+  els.mapExpandButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMapExpanded(true);
+  });
+  els.mapCloseButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMapExpanded(false);
+  });
 
   els.scheduleButton.addEventListener("click", () => {
     els.scheduleImage.value = "";
@@ -328,6 +339,11 @@ function bindEvents() {
   window.addEventListener("pagehide", captureLastLocationBeforeBackground);
   window.addEventListener("pageshow", resumeLocationAfterReturn);
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.map.classList.contains("expanded")) {
+      setMapExpanded(false);
+    }
+  });
   window.addEventListener("resize", syncMapOverlays);
 }
 
@@ -1016,6 +1032,7 @@ function renderAuthGate() {
 
   if (!signedIn) {
     stopTimelineClock();
+    setMapExpanded(false);
     els.cloudBadge.textContent = services.provider === "base44"
       ? "Group-code sync"
       : "Local group store";
@@ -1069,6 +1086,22 @@ function renderAll() {
   renderSelectedFriendSummary();
   if (els.profileDialog.open) renderFriendList(els.profileFriendList, { closeDialog: null });
   if (els.friendDetailDialog.open) renderFriendDetail();
+}
+
+function handleMapClick(event) {
+  if (event.target.closest(".friend-pin, .map-expand-button, .map-close-button")) return;
+  if (!els.map.classList.contains("expanded")) {
+    setMapExpanded(true);
+  }
+}
+
+function setMapExpanded(expanded) {
+  els.map.classList.toggle("expanded", expanded);
+  document.body.classList.toggle("map-expanded", expanded);
+  els.map.setAttribute("aria-expanded", String(expanded));
+  els.mapExpandButton.hidden = expanded;
+  els.mapCloseButton.hidden = !expanded;
+  window.setTimeout(syncMapOverlays, 80);
 }
 
 function renderDayButtons() {
@@ -1214,7 +1247,8 @@ function renderPins() {
       pin.type = "button";
       pin.className = "friend-pin";
       pin.dataset.friendId = friend.id;
-      pin.addEventListener("click", () => {
+      pin.addEventListener("click", (event) => {
+        event.stopPropagation();
         selectedFriendId = friend.id;
         renderAll();
         renderFriendDetail(friend);
@@ -1334,23 +1368,41 @@ function renderFriendDetail(friend = selectedFriend()) {
     return dayDiff || a.start - b.start;
   });
 
-  if (!schedule.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "No schedule uploaded yet.";
-    els.friendDetailSchedule.append(empty);
-    return;
-  }
+  Object.entries(days).forEach(([dayId, day]) => {
+    const dayEvents = schedule.filter((item) => item.day === dayId);
+    const section = document.createElement("section");
+    section.className = "friend-schedule-day";
 
-  schedule.forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "parsed-event";
+    const header = document.createElement("div");
+    header.className = "friend-schedule-day-header";
     const title = document.createElement("strong");
-    title.textContent = item.artist;
-    const meta = document.createElement("span");
-    meta.textContent = `${days[item.day].label} - ${formatTime(item.start)} to ${formatTime(item.end)} - ${stageById(item.stageId).name}`;
-    row.append(title, meta);
-    els.friendDetailSchedule.append(row);
+    title.textContent = day.label;
+    const count = document.createElement("span");
+    count.textContent = dayEvents.length ? `${dayEvents.length} sets` : "No sets";
+    header.append(title, count);
+    section.append(header);
+
+    if (!dayEvents.length) {
+      const empty = document.createElement("p");
+      empty.className = "friend-schedule-empty";
+      empty.textContent = schedule.length ? "Nothing uploaded for this day." : "No schedule uploaded yet.";
+      section.append(empty);
+      els.friendDetailSchedule.append(section);
+      return;
+    }
+
+    dayEvents.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "parsed-event friend-schedule-event";
+      const artist = document.createElement("strong");
+      artist.textContent = item.artist;
+      const meta = document.createElement("span");
+      meta.textContent = `${formatTime(item.start)} to ${formatTime(item.end)} - ${stageById(item.stageId).name}`;
+      row.append(artist, meta);
+      section.append(row);
+    });
+
+    els.friendDetailSchedule.append(section);
   });
 }
 
