@@ -247,6 +247,32 @@ p {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255, 235, 0, 0.28);
+  border-radius: var(--radius);
+  background: rgba(0, 240, 255, 0.08);
+}
+
+.auth-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.auth-tabs button.active {
+  background: var(--yellow);
+  color: #090a10;
+  box-shadow: 0 0 18px rgba(255, 232, 31, 0.24);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -301,6 +327,53 @@ label {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;
   gap: 8px;
+}
+
+.saved-group-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 235, 0, 0.34);
+  border-radius: var(--radius);
+  background: rgba(255, 235, 0, 0.08);
+}
+
+.saved-group-title {
+  color: var(--yellow);
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.saved-group-button {
+  min-height: 36px;
+  border: 1px solid rgba(0, 240, 255, 0.30);
+  border-radius: 7px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  text-align: left;
+}
+
+.saved-group-button strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-group-button span {
+  color: var(--yellow);
+  font-size: 10px;
+  font-weight: 950;
 }
 
 .icon-mini {

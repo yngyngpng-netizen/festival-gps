@@ -1,17 +1,17 @@
-const CACHE_NAME = "festival-gps-v56";
+const CACHE_NAME = "festival-gps-v57";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=20260513-21",
-  "./app.js?v=20260513-21",
+  "./styles.css?v=20260513-22",
+  "./app.js?v=20260513-22",
   "./base44-config.js",
   "./firebase-config.js",
-  "./manifest.webmanifest?v=20260513-21",
+  "./manifest.webmanifest?v=20260513-22",
   "./assets/edc-grid-map.jpg?v=20260513-1",
-  "./assets/icon.svg?v=20260513-21",
-  "./assets/apple-touch-icon.png?v=20260513-21",
-  "./assets/icon-192.png?v=20260513-21",
-  "./assets/icon-512.png?v=20260513-21"
+  "./assets/icon.svg?v=20260513-22",
+  "./assets/apple-touch-icon.png?v=20260513-22",
+  "./assets/icon-192.png?v=20260513-22",
+  "./assets/icon-512.png?v=20260513-22"
 ];
 
 self.addEventListener("install", (event) => {
@@ -47,11 +47,16 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
+          if (!response.ok && event.request.mode === "navigate") {
+            throw new Error("Navigation fallback");
+          }
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(event.request).then((cached) => (
+          cached || caches.match("./index.html") || caches.match("./")
+        )))
     );
     return;
   }

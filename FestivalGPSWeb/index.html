@@ -9,12 +9,12 @@
     <meta name="apple-mobile-web-app-title" content="Festival Buddy">
     <meta name="apple-itunes-app" content="app-id=561212119">
     <title>Festival Buddy</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260513-21">
-    <link rel="icon" href="assets/icon.svg?v=20260513-21" type="image/svg+xml">
-    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260513-21">
-    <link rel="stylesheet" href="styles.css?v=20260513-21">
+    <link rel="manifest" href="manifest.webmanifest?v=20260513-22">
+    <link rel="icon" href="assets/icon.svg?v=20260513-22" type="image/svg+xml">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260513-22">
+    <link rel="stylesheet" href="styles.css?v=20260513-22">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260513-21"></script>
+    <script type="module" src="app.js?v=20260513-22"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Join Festival Buddy group">
@@ -29,6 +29,10 @@
         </div>
         <h1>Find your crew under Electric Sky</h1>
         <p class="auth-copy">Use live GPS when signal works, then fall back to cached last-seen grid, schedules, set times, and stage pins when phones go offline.</p>
+        <div class="auth-tabs" role="tablist" aria-label="Login type">
+          <button id="newUserTab" class="active" type="button" role="tab" aria-selected="true">New user</button>
+          <button id="returningUserTab" type="button" role="tab" aria-selected="false">Returning user</button>
+        </div>
         <p id="cloudBadge" class="sync-badge" hidden></p>
 
         <div class="auth-grid">
@@ -40,7 +44,7 @@
             <span>4-6 digit PIN</span>
             <input id="authPin" type="password" inputmode="numeric" autocomplete="off" pattern="[0-9]*" maxlength="6" placeholder="1234" required>
           </label>
-          <div class="group-entry">
+          <div id="newUserFields" class="group-entry">
             <span>Are you starting a group or joining one?</span>
             <div class="group-mode" role="group" aria-label="Group mode">
               <button id="createGroupButton" class="active" type="button">Start new group</button>
@@ -54,9 +58,10 @@
               </button>
             </div>
           </div>
+          <div id="savedGroupPanel" class="saved-group-panel" hidden></div>
         </div>
 
-        <div class="photo-card">
+        <div id="authPhotoCard" class="photo-card">
           <div id="authPhotoPreview" class="large-avatar">YOU</div>
           <label class="photo-upload">
             <span>Profile picture required</span>

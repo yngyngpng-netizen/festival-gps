@@ -2,6 +2,8 @@ import { BASE44_CONFIG, MAPKIT_CONFIG, base44IsConfigured } from "./base44-confi
 
 const STORAGE_KEY = "festival-gps-pwa-v2";
 const LAST_GROUP_KEY = "festival-gps-last-group";
+const SESSION_BACKUP_KEY = "festival-gps-session-backup-v1";
+const GROUP_BACKUP_PREFIX = "festival-gps-group-cache:";
 const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const PROFILE_PHOTO_SIZE = 192;
@@ -234,6 +236,7 @@ let pendingAuthPhoto = "";
 let pendingProfilePhoto = "";
 let pendingAuthFile = null;
 let pendingProfileFile = null;
+let authMode = "new";
 let groupMode = "create";
 let locationWatchId = null;
 let locationSharing = false;
@@ -250,6 +253,7 @@ let selectedBucketId = "";
 let activePinDrag = null;
 let groupRefreshTimer = null;
 let groupRenderTimer = null;
+let savedGroupRenderToken = 0;
 const pinDragOffsets = new Map();
 const artistImageCache = new Map();
 const artistImagePending = new Map();
@@ -272,6 +276,7 @@ async function init() {
   renderStages();
   bindEvents();
   setGroupMode("create");
+  setAuthMode("new");
   await initCloud();
   if (!state.user) hydrateLocalSession({ allowCloudFallback: true });
   renderAuthGate();
@@ -357,10 +362,15 @@ function bindElements() {
     "authPhoto",
     "authPhotoPreview",
     "authSubmitButton",
+    "newUserTab",
+    "returningUserTab",
     "createGroupButton",
     "joinGroupButton",
     "groupModeHint",
     "regenerateGroupButton",
+    "newUserFields",
+    "savedGroupPanel",
+    "authPhotoCard",
     "authMessage",
     "cloudBadge",
     "currentContext",
@@ -433,11 +443,17 @@ function bindElements() {
 
 function bindEvents() {
   els.authForm.addEventListener("submit", handleAuthSubmit);
-  els.authName.addEventListener("input", () => renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value));
+  els.authName.addEventListener("input", () => {
+    renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value);
+    renderSavedGroupOptions();
+  });
   els.authPin.addEventListener("input", () => {
     els.authPin.value = cleanPin(els.authPin.value);
     clearVerificationStep();
+    renderSavedGroupOptions();
   });
+  els.newUserTab.addEventListener("click", () => setAuthMode("new"));
+  els.returningUserTab.addEventListener("click", () => setAuthMode("returning"));
   els.createGroupButton.addEventListener("click", () => setGroupMode("create"));
   els.joinGroupButton.addEventListener("click", () => setGroupMode("join"));
   els.regenerateGroupButton.addEventListener("click", () => {
@@ -703,7 +719,7 @@ async function initBase44Cloud() {
 }
 
 async function resumeBase44Session() {
-  const session = localStore.session;
+  const session = storedSession();
   const groupCode = normalizeGroupCode(session?.groupCode || localStorage.getItem(LAST_GROUP_KEY) || "");
   const uid = session?.uid || "";
   if (!groupCode || !uid) return false;
@@ -731,18 +747,26 @@ async function resumeBase44Session() {
 
 function hydrateLocalSession(options = {}) {
   if (services.cloud && !options.allowCloudFallback) return false;
-  if (!localStore.session?.uid || !localStore.session?.groupCode) return false;
+  const session = storedSession();
+  if (!session?.uid || !session?.groupCode) return false;
 
-  const group = localStore.groups[localStore.session.groupCode];
-  const user = group?.members?.[localStore.session.uid];
+  const group = localStore.groups[session.groupCode] || readGroupBackup(session.groupCode);
+  if (group && !localStore.groups[session.groupCode]) {
+    localStore.groups[session.groupCode] = group;
+  }
+
+  const members = group?.members || {};
+  const user = members[session.uid] || Object.values(members).find((member) => member.userId === session.uid);
   if (!group || !user) return false;
 
   state.selectedDay = localStore.selectedDay || state.selectedDay;
   state.selectedMinute = localStore.selectedMinute || state.selectedMinute;
   state.user = user;
-  state.groupCode = localStore.session.groupCode;
+  state.groupCode = session.groupCode;
   state.friends = friendsFromGroup(group);
   selectedFriendId = user.id;
+  localStore.session = { uid: user.id, groupCode: session.groupCode };
+  persistOfflineSessionBackup(localStore.session, group);
   return true;
 }
 
@@ -767,6 +791,10 @@ async function handleAuthSubmit(event) {
   try {
     if (!rawName) throw new Error("Enter your user name.");
     if (!validPin(pin)) throw new Error("Enter a 4-6 digit PIN.");
+    if (authMode === "returning") {
+      await enterFirstSavedGroup(rawName, pin);
+      return;
+    }
     if (!groupCode) throw new Error("Enter a group code.");
     requestLocationPermissionOnEntry();
 
@@ -1151,6 +1179,7 @@ async function signOutUser(options = {}) {
   localStore.shareLocation = false;
   localStore.currentLocationMode = false;
   currentLocationMode = false;
+  clearOfflineSessionBackup();
   saveLocalStore();
   localStorage.removeItem(LAST_GROUP_KEY);
   resetState();
@@ -1427,7 +1456,31 @@ function openProfileSheet() {
 
 function setBusy(isBusy) {
   els.authSubmitButton.disabled = isBusy;
-  els.authSubmitButton.textContent = isBusy ? "Opening the gate..." : "Enter app";
+  els.authSubmitButton.textContent = isBusy ? "Opening the gate..." : authSubmitLabel();
+}
+
+function authSubmitLabel() {
+  return authMode === "returning" ? "Open saved group" : "Enter app";
+}
+
+function setAuthMode(mode) {
+  authMode = mode === "returning" ? "returning" : "new";
+  const returning = authMode === "returning";
+  els.newUserTab.classList.toggle("active", !returning);
+  els.returningUserTab.classList.toggle("active", returning);
+  els.newUserTab.setAttribute("aria-selected", String(!returning));
+  els.returningUserTab.setAttribute("aria-selected", String(returning));
+  els.newUserFields.hidden = returning;
+  els.authPhotoCard.hidden = returning;
+  els.authGroupCode.required = !returning;
+  els.authSubmitButton.textContent = authSubmitLabel();
+  if (returning) {
+    els.groupModeHint.textContent = "Type your saved user name and PIN, then pick one of your saved groups on this phone.";
+  } else {
+    setGroupMode(groupMode);
+  }
+  renderSavedGroupOptions();
+  clearVerificationStep();
 }
 
 function setGroupMode(mode) {
@@ -1450,8 +1503,145 @@ function setGroupMode(mode) {
   clearVerificationStep();
 }
 
+async function renderSavedGroupOptions() {
+  if (!els.savedGroupPanel) return;
+  const token = ++savedGroupRenderToken;
+  els.savedGroupPanel.replaceChildren();
+
+  if (authMode !== "returning") {
+    els.savedGroupPanel.hidden = true;
+    return;
+  }
+
+  els.savedGroupPanel.hidden = false;
+  els.savedGroupPanel.append(savedGroupPanelTitle("Saved groups"));
+
+  const rawName = els.authName.value.trim();
+  const pin = cleanPin(els.authPin.value);
+  if (!rawName) {
+    els.savedGroupPanel.append(savedGroupMessage("Enter your user name to find saved groups on this phone."));
+    return;
+  }
+  if (!validPin(pin)) {
+    els.savedGroupPanel.append(savedGroupMessage("Enter your 4-6 digit PIN to unlock saved groups."));
+    return;
+  }
+
+  const matches = await savedGroupMatches(rawName, pin);
+  if (token !== savedGroupRenderToken) return;
+
+  els.savedGroupPanel.replaceChildren(savedGroupPanelTitle("Saved groups"));
+  if (!matches.length) {
+    els.savedGroupPanel.append(savedGroupMessage("No saved group found for that name and PIN on this phone."));
+    return;
+  }
+
+  matches.forEach((match) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "saved-group-button";
+    button.append(
+      Object.assign(document.createElement("strong"), { textContent: match.groupCode }),
+      Object.assign(document.createElement("span"), { textContent: `${match.friendCount} crew` })
+    );
+    button.addEventListener("click", async () => {
+      setBusy(true);
+      els.authMessage.textContent = "";
+      try {
+        await enterSavedGroup(match);
+      } catch (error) {
+        els.authMessage.textContent = humanAuthError(error);
+      } finally {
+        setBusy(false);
+      }
+    });
+    els.savedGroupPanel.append(button);
+  });
+}
+
+function savedGroupPanelTitle(text) {
+  const title = document.createElement("span");
+  title.className = "saved-group-title";
+  title.textContent = text;
+  return title;
+}
+
+function savedGroupMessage(text) {
+  const message = document.createElement("p");
+  message.className = "group-hint";
+  message.textContent = text;
+  return message;
+}
+
+async function savedGroupMatches(rawName, pin) {
+  const name = cleanName(rawName);
+  const matches = [];
+  const seen = new Set();
+
+  for (const [code, group] of Object.entries(localStore.groups || {})) {
+    const normalizedGroup = normalizeCachedGroup(code, group);
+    if (!normalizedGroup || seen.has(normalizedGroup.code)) continue;
+    seen.add(normalizedGroup.code);
+    const members = activeMembers(Object.values(normalizedGroup.members || {}));
+    const member = members.find((friend) => sameName(friend.name, name));
+    if (!member?.pinHash) continue;
+    if (await verifyPin(pin, member.pinHash, member.pinSalt, normalizedGroup.code)) {
+      matches.push({
+        groupCode: normalizedGroup.code,
+        group: normalizedGroup,
+        member,
+        friendCount: members.length
+      });
+    }
+  }
+
+  return matches.sort((a, b) => a.groupCode.localeCompare(b.groupCode));
+}
+
+async function enterFirstSavedGroup(rawName, pin) {
+  const matches = await savedGroupMatches(rawName, pin);
+  if (!matches.length) throw new Error("No saved group found for that name and PIN on this phone.");
+  if (matches.length > 1) {
+    await renderSavedGroupOptions();
+    throw new Error("Select one of your saved groups.");
+  }
+  await enterSavedGroup(matches[0]);
+}
+
+async function enterSavedGroup(match) {
+  const group = match.group || localStore.groups[match.groupCode] || readGroupBackup(match.groupCode);
+  const member = match.member || Object.values(group?.members || {}).find((friend) => sameName(friend.name, els.authName.value));
+  if (!group || !member) throw new Error("That saved group is no longer cached on this phone.");
+
+  const pin = cleanPin(els.authPin.value);
+  if (member.pinHash && !(await verifyPin(pin, member.pinHash, member.pinSalt, match.groupCode))) {
+    throw new Error("PIN is not correct.");
+  }
+
+  localStore.groups[match.groupCode] = group;
+  state.user = member;
+  state.groupCode = match.groupCode;
+  state.friends = friendsFromGroup(group);
+  selectedFriendId = member.id;
+  localStore.session = { uid: member.id, groupCode: match.groupCode };
+  localStorage.setItem(LAST_GROUP_KEY, match.groupCode);
+  persistOfflineSessionBackup(localStore.session, group);
+  saveLocalStore();
+
+  currentLocationMode = Boolean(localStore.currentLocationMode);
+  pendingAuthPhoto = "";
+  pendingAuthFile = null;
+  els.authForm.reset();
+  renderAuthPhotoPreview("", "");
+  renderAuthGate();
+
+  if (services.provider === "base44" && services.base44 && navigator.onLine) {
+    subscribeToBase44Group(match.groupCode).catch(() => {});
+  }
+}
+
 function clearVerificationStep() {
-  if (els.authSubmitButton) els.authSubmitButton.textContent = "Enter app";
+  if (els.authSubmitButton) els.authSubmitButton.textContent = authSubmitLabel();
 }
 
 function renderAuthGate() {
@@ -3943,21 +4133,7 @@ function currentUserCanManageGroup() {
   return !state.friends.some((friend) => friend.isGroupOwner && !isRemovedMember(friend));
 }
 
-function loadLocalStore() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (stored?.groups) {
-      return {
-        ...stored,
-        shareLocation: Boolean(stored.shareLocation),
-        currentLocationMode: Boolean(stored.currentLocationMode),
-        pendingLiveLocation: stored.pendingLiveLocation || null
-      };
-    }
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
-  }
-
+function defaultLocalStore() {
   return {
     session: null,
     groups: {},
@@ -3969,10 +4145,54 @@ function loadLocalStore() {
   };
 }
 
+function loadLocalStore() {
+  const defaults = defaultLocalStore();
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (stored?.groups) {
+      return storeWithOfflineBackups({
+        ...defaults,
+        ...stored,
+        shareLocation: Boolean(stored.shareLocation),
+        currentLocationMode: Boolean(stored.currentLocationMode),
+        pendingLiveLocation: stored.pendingLiveLocation || null
+      });
+    }
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  return storeWithOfflineBackups(defaults);
+}
+
+function storeWithOfflineBackups(store) {
+  const next = {
+    ...store,
+    groups: { ...(store.groups || {}) }
+  };
+  const session = normalizeSession(next.session) || readSessionBackup();
+  if (session) {
+    next.session = session;
+    if (days[session.selectedDay]) next.selectedDay = session.selectedDay;
+    if (Number.isFinite(session.selectedMinute)) next.selectedMinute = session.selectedMinute;
+    if (typeof session.currentLocationMode === "boolean") next.currentLocationMode = session.currentLocationMode;
+    if (typeof session.shareLocation === "boolean") next.shareLocation = session.shareLocation;
+    const backupGroup = readGroupBackup(session.groupCode);
+    if (backupGroup && !next.groups[session.groupCode]) {
+      next.groups[session.groupCode] = backupGroup;
+    }
+  }
+  return next;
+}
+
 function saveLocalStore() {
   localStore.selectedDay = state.selectedDay;
   localStore.selectedMinute = state.selectedMinute;
   localStore.currentLocationMode = currentLocationMode;
+  persistOfflineSessionBackup(
+    localStore.session,
+    localStore.session?.groupCode ? localStore.groups[localStore.session.groupCode] : null
+  );
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(localStore));
   } catch {
@@ -4020,7 +4240,135 @@ function cacheCurrentGroup() {
     members: Object.fromEntries(members)
   };
   localStore.session = { uid: state.user.id, groupCode: state.groupCode };
+  persistOfflineSessionBackup(localStore.session, localStore.groups[state.groupCode]);
   saveLocalStore();
+}
+
+function storedSession() {
+  return normalizeSession(localStore.session) || readSessionBackup();
+}
+
+function normalizeSession(session) {
+  const uid = session?.uid || session?.userId || "";
+  const groupCode = normalizeGroupCode(session?.groupCode || "");
+  if (!uid || !groupCode) return null;
+  return {
+    uid,
+    groupCode,
+    selectedDay: days[session.selectedDay] ? session.selectedDay : "",
+    selectedMinute: Number.isFinite(Number(session.selectedMinute)) ? Number(session.selectedMinute) : null,
+    currentLocationMode: typeof session.currentLocationMode === "boolean" ? session.currentLocationMode : null,
+    shareLocation: typeof session.shareLocation === "boolean" ? session.shareLocation : null
+  };
+}
+
+function readSessionBackup() {
+  try {
+    return normalizeSession(JSON.parse(localStorage.getItem(SESSION_BACKUP_KEY) || "null"));
+  } catch {
+    localStorage.removeItem(SESSION_BACKUP_KEY);
+    return null;
+  }
+}
+
+function readGroupBackup(groupCode) {
+  const code = normalizeGroupCode(groupCode);
+  if (!code) return null;
+  try {
+    const stored = JSON.parse(localStorage.getItem(`${GROUP_BACKUP_PREFIX}${code}`) || "null");
+    return normalizeCachedGroup(code, stored?.group || stored);
+  } catch {
+    localStorage.removeItem(`${GROUP_BACKUP_PREFIX}${code}`);
+    return null;
+  }
+}
+
+function normalizeCachedGroup(groupCode, group) {
+  if (!group?.members) return null;
+  const code = normalizeGroupCode(group?.code || groupCode);
+  const members = {};
+  Object.entries(group.members || {}).forEach(([id, member]) => {
+    const normalized = normalizeMember({
+      ...member,
+      id: member.id || id,
+      groupCode: member.groupCode || code
+    });
+    members[normalized.id || id] = normalized;
+  });
+  return { code, members };
+}
+
+function persistOfflineSessionBackup(session, group) {
+  const normalized = normalizeSession(session);
+  if (!normalized) return;
+
+  try {
+    localStorage.setItem(SESSION_BACKUP_KEY, JSON.stringify({
+      ...normalized,
+      selectedDay: state.selectedDay,
+      selectedMinute: state.selectedMinute,
+      currentLocationMode,
+      shareLocation: Boolean(localStore.shareLocation),
+      savedAt: new Date().toISOString()
+    }));
+    localStorage.setItem(LAST_GROUP_KEY, normalized.groupCode);
+  } catch {
+    // The main store still holds the live in-memory session for this page.
+  }
+
+  if (!group) return;
+  try {
+    localStorage.setItem(`${GROUP_BACKUP_PREFIX}${normalized.groupCode}`, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      group: compactOfflineGroup(normalized.groupCode, group)
+    }));
+  } catch {
+    // Offline restore can still use the primary store if this compact backup cannot be written.
+  }
+}
+
+function compactOfflineGroup(groupCode, group) {
+  const code = normalizeGroupCode(group?.code || groupCode);
+  const members = {};
+  Object.entries(group?.members || {}).forEach(([id, member]) => {
+    const normalized = normalizeMember({
+      ...member,
+      id: member.id || id,
+      groupCode: member.groupCode || code
+    });
+    members[normalized.id || id] = {
+      id: normalized.id,
+      userId: normalized.userId,
+      name: normalized.name,
+      photo: offlinePhotoValue(normalized.photo),
+      color: normalized.color,
+      isGroupOwner: normalized.isGroupOwner,
+      createdAt: normalized.createdAt,
+      removedAt: normalized.removedAt,
+      removedBy: normalized.removedBy,
+      pinHash: normalized.pinHash,
+      pinSalt: normalized.pinSalt,
+      groupCode: code,
+      schedule: normalized.schedule,
+      liveLocation: normalized.liveLocation
+    };
+  });
+  return { code, members };
+}
+
+function offlinePhotoValue(photo) {
+  if (!photo || String(photo).startsWith("data:")) return "";
+  return photo;
+}
+
+function clearOfflineSessionBackup() {
+  const session = storedSession();
+  try {
+    localStorage.removeItem(SESSION_BACKUP_KEY);
+    if (session?.groupCode) localStorage.removeItem(`${GROUP_BACKUP_PREFIX}${session.groupCode}`);
+  } catch {
+    // Storage cleanup is best effort.
+  }
 }
 
 function resetState() {
