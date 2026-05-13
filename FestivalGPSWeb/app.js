@@ -1475,7 +1475,7 @@ function setAuthMode(mode) {
   els.authGroupCode.required = !returning;
   els.authSubmitButton.textContent = authSubmitLabel();
   if (returning) {
-    els.groupModeHint.textContent = "Type your saved user name and PIN, then pick one of your saved groups on this phone.";
+    els.groupModeHint.textContent = "Type your saved user name and PIN, then pick one of your synced or cached groups.";
   } else {
     setGroupMode(groupMode);
   }
@@ -1519,24 +1519,26 @@ async function renderSavedGroupOptions() {
   const rawName = els.authName.value.trim();
   const pin = cleanPin(els.authPin.value);
   if (!rawName) {
-    els.savedGroupPanel.append(savedGroupMessage("Enter your user name to find saved groups on this phone."));
+    els.savedGroupPanel.append(savedGroupMessage("Enter your user name to find saved or synced groups."));
     return;
   }
   if (!validPin(pin)) {
-    els.savedGroupPanel.append(savedGroupMessage("Enter your 4-6 digit PIN to unlock saved groups."));
+    els.savedGroupPanel.append(savedGroupMessage("Enter your 4-6 digit PIN to unlock saved or synced groups."));
     return;
   }
 
-  const matches = await savedGroupMatches(rawName, pin);
+  const result = await savedGroupSearch(rawName, pin);
   if (token !== savedGroupRenderToken) return;
 
   els.savedGroupPanel.replaceChildren(savedGroupPanelTitle("Saved groups"));
-  if (!matches.length) {
-    els.savedGroupPanel.append(savedGroupMessage("No saved group found for that name and PIN on this phone."));
+  if (!result.matches.length) {
+    els.savedGroupPanel.append(savedGroupMessage(result.wrongPin
+      ? "PIN is not correct."
+      : "No saved or synced group found for that name."));
     return;
   }
 
-  matches.forEach((match) => {
+  result.matches.forEach((match) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "saved-group-button";
@@ -1573,15 +1575,13 @@ function savedGroupMessage(text) {
   return message;
 }
 
-async function savedGroupMatches(rawName, pin) {
+async function savedGroupSearch(rawName, pin) {
   const name = cleanName(rawName);
+  const groups = await savedGroupSearchGroups();
   const matches = [];
-  const seen = new Set();
+  let wrongPin = false;
 
-  for (const [code, group] of Object.entries(localStore.groups || {})) {
-    const normalizedGroup = normalizeCachedGroup(code, group);
-    if (!normalizedGroup || seen.has(normalizedGroup.code)) continue;
-    seen.add(normalizedGroup.code);
+  for (const normalizedGroup of groups.values()) {
     const members = activeMembers(Object.values(normalizedGroup.members || {}));
     const member = members.find((friend) => sameName(friend.name, name));
     if (!member?.pinHash) continue;
@@ -1592,20 +1592,57 @@ async function savedGroupMatches(rawName, pin) {
         member,
         friendCount: members.length
       });
+    } else {
+      wrongPin = true;
     }
   }
 
-  return matches.sort((a, b) => a.groupCode.localeCompare(b.groupCode));
+  return {
+    matches: matches.sort((a, b) => a.groupCode.localeCompare(b.groupCode)),
+    wrongPin
+  };
+}
+
+async function savedGroupSearchGroups() {
+  const groups = new Map();
+
+  Object.entries(localStore.groups || {}).forEach(([code, group]) => {
+    const normalizedGroup = normalizeCachedGroup(code, group);
+    if (normalizedGroup) groups.set(normalizedGroup.code, normalizedGroup);
+  });
+
+  if (services.provider !== "base44" || !services.base44 || !navigator.onLine) {
+    return groups;
+  }
+
+  try {
+    const records = await services.base44.entities.CrewMember.filter({});
+    records
+      .map((record) => normalizeMember(record))
+      .filter((member) => member.groupCode && !isRemovedMember(member))
+      .forEach((member) => {
+        const code = normalizeGroupCode(member.groupCode);
+        const group = groups.get(code) || { code, members: {} };
+        group.members[member.id] = member;
+        groups.set(code, group);
+      });
+  } catch {
+    // Local saved groups still work offline or if the cloud search is unavailable.
+  }
+
+  return groups;
 }
 
 async function enterFirstSavedGroup(rawName, pin) {
-  const matches = await savedGroupMatches(rawName, pin);
-  if (!matches.length) throw new Error("No saved group found for that name and PIN on this phone.");
-  if (matches.length > 1) {
+  const result = await savedGroupSearch(rawName, pin);
+  if (!result.matches.length) {
+    throw new Error(result.wrongPin ? "PIN is not correct." : "No saved or synced group found for that name.");
+  }
+  if (result.matches.length > 1) {
     await renderSavedGroupOptions();
     throw new Error("Select one of your saved groups.");
   }
-  await enterSavedGroup(matches[0]);
+  await enterSavedGroup(result.matches[0]);
 }
 
 async function enterSavedGroup(match) {
