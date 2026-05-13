@@ -1124,6 +1124,25 @@ textarea {
   align-items: center;
 }
 
+.current-location-button {
+  min-height: 34px;
+  border: 1px solid rgba(0, 122, 255, 0.22);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  background: rgba(0, 122, 255, 0.10);
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.current-location-button.active {
+  background: var(--cyan);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(0, 122, 255, 0.22);
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1820,7 +1839,15 @@ dialog::backdrop {
   }
 
   .timeline-row {
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px;
+  }
+
+  .current-location-button {
+    min-height: 28px;
+    border-radius: 12px;
+    padding: 0 8px;
+    font-size: 10px;
   }
 
   .segmented {

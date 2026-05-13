@@ -181,6 +181,7 @@ function bindElements() {
     "appleMapLayer",
     "locationButton",
     "scheduleButton",
+    "currentLocationButton",
     "dayButtons",
     "timeSliderWrap",
     "timeRange",
@@ -279,6 +280,7 @@ function bindEvents() {
     saveLocalStore();
     renderAll();
   });
+  els.currentLocationButton.addEventListener("click", showCurrentLocation);
 
   els.profileName.addEventListener("input", () => {
     renderProfilePreview({ ...currentUser(), name: els.profileName.value, photo: pendingProfilePhoto || currentUser().photo });
@@ -1035,6 +1037,8 @@ function renderAll() {
   els.groupCodeLabel.textContent = state.groupCode;
   els.friendGroupCode.textContent = state.groupCode;
   els.profileGroupCode.textContent = state.groupCode;
+  els.currentLocationButton.classList.toggle("active", timelineFollowsClock);
+  els.currentLocationButton.setAttribute("aria-pressed", String(timelineFollowsClock));
   renderLocationState();
 
   [...els.dayButtons.children].forEach((button, index) => {
@@ -1091,6 +1095,20 @@ function syncTimelineToNow(options = {}) {
   if (changed) saveLocalStore();
   if (changed && options.render) renderAll();
   return changed;
+}
+
+function showCurrentLocation() {
+  timelineFollowsClock = true;
+  const synced = syncTimelineToNow({ render: false });
+
+  if (!synced) {
+    const day = days[state.selectedDay];
+    state.selectedMinute = clamp(minuteForFestivalClock(new Date()), day.start, day.end);
+    saveLocalStore();
+  }
+
+  if (!locationSharing) startLiveLocation({ quiet: true });
+  renderAll();
 }
 
 function festivalMomentForNow(now) {
