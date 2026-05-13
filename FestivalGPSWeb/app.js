@@ -4,6 +4,8 @@ const STORAGE_KEY = "festival-gps-pwa-v2";
 const LAST_GROUP_KEY = "festival-gps-last-group";
 const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
+const PROFILE_PHOTO_SIZE = 192;
+const PROFILE_PHOTO_QUALITY = 0.68;
 const EDC_GEO_MARGIN = 0.0015;
 const MAP_PIN_BOUNDS = {
   minX: 0.065,
@@ -220,7 +222,6 @@ function bindElements() {
     "friendDetailSchedule",
     "photoCropDialog",
     "photoCropCanvas",
-    "photoCropZoom",
     "photoCropApply",
     "photoCropCancel",
     "scheduleDialog",
@@ -306,7 +307,11 @@ function bindEvents() {
     }
   });
 
-  els.photoCropZoom.addEventListener("input", drawPhotoCropPreview);
+  els.photoCropCanvas.addEventListener("pointerdown", handlePhotoCropPointerDown);
+  els.photoCropCanvas.addEventListener("pointermove", handlePhotoCropPointerMove);
+  els.photoCropCanvas.addEventListener("pointerup", handlePhotoCropPointerEnd);
+  els.photoCropCanvas.addEventListener("pointercancel", handlePhotoCropPointerEnd);
+  els.photoCropCanvas.addEventListener("wheel", handlePhotoCropWheel, { passive: false });
   els.photoCropApply.addEventListener("click", applyPhotoCrop);
   els.photoCropCancel.addEventListener("click", cancelPhotoCrop);
   els.photoCropDialog.addEventListener("cancel", (event) => {
@@ -563,7 +568,10 @@ async function handleAuthSubmit(event) {
     requestLocationPermissionOnEntry();
 
     if (services.provider === "base44") {
-      await enterBase44GroupByName(groupCode, profile, pin);
+      const cloudProfile = pendingAuthPhoto
+        ? { ...profile, photo: await uploadBase44Photo(pendingAuthFile, pendingAuthPhoto) }
+        : profile;
+      await enterBase44GroupByName(groupCode, cloudProfile, pin);
     } else {
       await enterLocalGroupByName(profile, groupCode, pin);
     }
@@ -2523,9 +2531,13 @@ async function openPhotoCropper(file, target) {
       file,
       image,
       target,
-      resolve
+      resolve,
+      zoom: 1,
+      offsetX: 0,
+      offsetY: 0,
+      pointers: new Map(),
+      gesture: null
     };
-    els.photoCropZoom.value = "1";
     drawPhotoCropPreview();
     openDialog(els.photoCropDialog);
   });
@@ -2537,7 +2549,8 @@ function drawPhotoCropPreview() {
   const canvas = els.photoCropCanvas;
   const context = canvas.getContext("2d");
   const size = canvas.width;
-  const crop = cropRectangle(cropState.image);
+  clampPhotoCropOffset();
+  const metrics = photoCropMetrics(size);
 
   context.clearRect(0, 0, size, size);
   context.fillStyle = "#f2f3f7";
@@ -2547,7 +2560,7 @@ function drawPhotoCropPreview() {
   context.beginPath();
   context.arc(size / 2, size / 2, size * 0.465, 0, Math.PI * 2);
   context.clip();
-  context.drawImage(cropState.image, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size);
+  context.drawImage(cropState.image, metrics.x, metrics.y, metrics.width, metrics.height);
   context.restore();
 
   context.save();
@@ -2566,27 +2579,175 @@ function drawPhotoCropPreview() {
   context.stroke();
 }
 
-function cropRectangle(image) {
-  const zoom = Number(els.photoCropZoom.value) || 1;
-  const baseSize = Math.min(image.width, image.height) / zoom;
-  const maxX = Math.max(0, image.width - baseSize);
-  const maxY = Math.max(0, image.height - baseSize);
-
+function photoCropMetrics(size, zoom = cropState.zoom, offsetX = cropState.offsetX, offsetY = cropState.offsetY) {
+  const image = cropState.image;
+  const scale = Math.max(size / image.width, size / image.height) * zoom;
+  const width = image.width * scale;
+  const height = image.height * scale;
   return {
-    x: maxX / 2,
-    y: maxY / 2,
-    size: baseSize
+    x: (size - width) / 2 + offsetX,
+    y: (size - height) / 2 + offsetY,
+    width,
+    height,
+    scale,
+    maxOffsetX: Math.max(0, (width - size) / 2),
+    maxOffsetY: Math.max(0, (height - size) / 2)
   };
+}
+
+function clampPhotoCropOffset() {
+  if (!cropState?.image) return;
+  cropState.zoom = clamp(cropState.zoom || 1, 1, 3.5);
+  const metrics = photoCropMetrics(els.photoCropCanvas.width);
+  cropState.offsetX = clamp(cropState.offsetX || 0, -metrics.maxOffsetX, metrics.maxOffsetX);
+  cropState.offsetY = clamp(cropState.offsetY || 0, -metrics.maxOffsetY, metrics.maxOffsetY);
+}
+
+function photoCropPoint(event) {
+  const canvas = els.photoCropCanvas;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY
+  };
+}
+
+function distanceBetween(left, right) {
+  return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function midpoint(left, right) {
+  return {
+    x: (left.x + right.x) / 2,
+    y: (left.y + right.y) / 2
+  };
+}
+
+function activeCropPointers() {
+  return [...(cropState?.pointers?.values() || [])];
+}
+
+function setPhotoCropZoom(nextZoom, focus) {
+  if (!cropState?.image) return;
+  const size = els.photoCropCanvas.width;
+  const current = photoCropMetrics(size);
+  const imageFocusX = (focus.x - current.x) / current.scale;
+  const imageFocusY = (focus.y - current.y) / current.scale;
+
+  cropState.zoom = clamp(nextZoom, 1, 3.5);
+  const next = photoCropMetrics(size);
+  cropState.offsetX = focus.x - imageFocusX * next.scale - (size - next.width) / 2;
+  cropState.offsetY = focus.y - imageFocusY * next.scale - (size - next.height) / 2;
+  clampPhotoCropOffset();
+}
+
+function handlePhotoCropPointerDown(event) {
+  if (!cropState) return;
+  event.preventDefault();
+  els.photoCropCanvas.setPointerCapture?.(event.pointerId);
+  cropState.pointers.set(event.pointerId, photoCropPoint(event));
+  const points = activeCropPointers();
+
+  if (points.length === 1) {
+    cropState.gesture = {
+      type: "pan",
+      startPoint: points[0],
+      startOffsetX: cropState.offsetX,
+      startOffsetY: cropState.offsetY
+    };
+    return;
+  }
+
+  if (points.length >= 2) {
+    cropState.gesture = {
+      type: "pinch",
+      lastDistance: distanceBetween(points[0], points[1]),
+      lastCenter: midpoint(points[0], points[1])
+    };
+  }
+}
+
+function handlePhotoCropPointerMove(event) {
+  if (!cropState?.pointers?.has(event.pointerId)) return;
+  event.preventDefault();
+  cropState.pointers.set(event.pointerId, photoCropPoint(event));
+  const points = activeCropPointers();
+
+  if (points.length >= 2) {
+    const distance = Math.max(1, distanceBetween(points[0], points[1]));
+    const center = midpoint(points[0], points[1]);
+    const lastDistance = Math.max(1, cropState.gesture?.lastDistance || distance);
+    const lastCenter = cropState.gesture?.lastCenter || center;
+    setPhotoCropZoom(cropState.zoom * (distance / lastDistance), center);
+    cropState.offsetX += center.x - lastCenter.x;
+    cropState.offsetY += center.y - lastCenter.y;
+    cropState.gesture = { type: "pinch", lastDistance: distance, lastCenter: center };
+    clampPhotoCropOffset();
+    drawPhotoCropPreview();
+    return;
+  }
+
+  if (points.length === 1) {
+    if (cropState.gesture?.type !== "pan") {
+      cropState.gesture = {
+        type: "pan",
+        startPoint: points[0],
+        startOffsetX: cropState.offsetX,
+        startOffsetY: cropState.offsetY
+      };
+    }
+    cropState.offsetX = cropState.gesture.startOffsetX + points[0].x - cropState.gesture.startPoint.x;
+    cropState.offsetY = cropState.gesture.startOffsetY + points[0].y - cropState.gesture.startPoint.y;
+    clampPhotoCropOffset();
+    drawPhotoCropPreview();
+  }
+}
+
+function handlePhotoCropPointerEnd(event) {
+  if (!cropState?.pointers) return;
+  cropState.pointers.delete(event.pointerId);
+  els.photoCropCanvas.releasePointerCapture?.(event.pointerId);
+  const points = activeCropPointers();
+
+  cropState.gesture = points.length === 1
+    ? {
+      type: "pan",
+      startPoint: points[0],
+      startOffsetX: cropState.offsetX,
+      startOffsetY: cropState.offsetY
+    }
+    : null;
+}
+
+function handlePhotoCropWheel(event) {
+  if (!cropState) return;
+  event.preventDefault();
+  const point = photoCropPoint(event);
+  const factor = event.deltaY > 0 ? 0.92 : 1.08;
+  setPhotoCropZoom(cropState.zoom * factor, point);
+  drawPhotoCropPreview();
 }
 
 function croppedPhotoDataUrl() {
   const output = document.createElement("canvas");
-  output.width = 320;
-  output.height = 320;
+  output.width = PROFILE_PHOTO_SIZE;
+  output.height = PROFILE_PHOTO_SIZE;
   const context = output.getContext("2d");
-  const crop = cropRectangle(cropState.image);
-  context.drawImage(cropState.image, crop.x, crop.y, crop.size, crop.size, 0, 0, output.width, output.height);
-  return output.toDataURL("image/jpeg", 0.82);
+  const previewSize = els.photoCropCanvas.width;
+  const scale = output.width / previewSize;
+  const metrics = photoCropMetrics(previewSize);
+  context.fillStyle = "#f2f3f7";
+  context.fillRect(0, 0, output.width, output.height);
+  context.drawImage(
+    cropState.image,
+    metrics.x * scale,
+    metrics.y * scale,
+    metrics.width * scale,
+    metrics.height * scale
+  );
+  return output.toDataURL("image/jpeg", PROFILE_PHOTO_QUALITY);
 }
 
 function applyPhotoCrop() {

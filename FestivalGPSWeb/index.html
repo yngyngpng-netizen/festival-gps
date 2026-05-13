@@ -12,9 +12,9 @@
     <link rel="manifest" href="manifest.webmanifest?v=20260512-28">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260512-28">
-    <link rel="stylesheet" href="styles.css?v=20260512-30">
+    <link rel="stylesheet" href="styles.css?v=20260512-31">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260512-30"></script>
+    <script type="module" src="app.js?v=20260512-31"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Join Festival Buddy group">
@@ -260,13 +260,7 @@
           </button>
         </header>
         <div class="crop-preview">
-          <canvas id="photoCropCanvas" width="320" height="320"></canvas>
-        </div>
-        <div class="crop-controls">
-          <label>
-            <span>Resize</span>
-            <input id="photoCropZoom" type="range" min="1" max="2.8" step="0.01" value="1">
-          </label>
+          <canvas id="photoCropCanvas" width="320" height="320" aria-label="Profile photo crop preview"></canvas>
         </div>
         <div class="button-row">
           <button id="photoCropApply" class="action-button" type="button">Upload profile photo</button>
