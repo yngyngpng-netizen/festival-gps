@@ -1017,7 +1017,7 @@ async function enterLocalGroupByName(profile, groupCode, pin, options = {}) {
 
 async function enforceBase44GroupLimits(CrewMember, { groupCode, friends, existing, creating }) {
   if (!existing && friends.length >= MAX_GROUP_MEMBERS) {
-    throw new Error(`This group is full. Festival Buddy allows up to ${MAX_GROUP_MEMBERS} people per group.`);
+    throw new Error(`This group is full. Festival Buddies allows up to ${MAX_GROUP_MEMBERS} people per group.`);
   }
 
   if (!creating) return;
@@ -1031,13 +1031,13 @@ async function enforceBase44GroupLimits(CrewMember, { groupCode, friends, existi
   const allMembers = await fetchAllCrewMembers(CrewMember);
   const groupCodes = mergedActiveGroupCodes(allMembers, cachedCrewMembers());
   if (!groupCodes.has(groupCode) && groupCodes.size >= MAX_ACTIVE_GROUPS) {
-    throw new Error(`Festival Buddy already has ${MAX_ACTIVE_GROUPS} active groups. Ask Yang before creating another group.`);
+    throw new Error(`Festival Buddies already has ${MAX_ACTIVE_GROUPS} active groups. Ask Yang before creating another group.`);
   }
 }
 
 function enforceLocalGroupLimits({ groupCode, friends, existing, creating }) {
   if (!existing && friends.length >= MAX_GROUP_MEMBERS) {
-    throw new Error(`This group is full. Festival Buddy allows up to ${MAX_GROUP_MEMBERS} people per group.`);
+    throw new Error(`This group is full. Festival Buddies allows up to ${MAX_GROUP_MEMBERS} people per group.`);
   }
 
   if (!creating) return;
@@ -1048,7 +1048,7 @@ function enforceLocalGroupLimits({ groupCode, friends, existing, creating }) {
 
   const groupCodes = activeGroupCodes(cachedCrewMembers());
   if (!groupCodes.has(groupCode) && groupCodes.size >= MAX_ACTIVE_GROUPS) {
-    throw new Error(`Festival Buddy already has ${MAX_ACTIVE_GROUPS} active groups. Ask Yang before creating another group.`);
+    throw new Error(`Festival Buddies already has ${MAX_ACTIVE_GROUPS} active groups. Ask Yang before creating another group.`);
   }
 }
 

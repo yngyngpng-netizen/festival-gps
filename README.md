@@ -1,6 +1,6 @@
-# Festival Buddy
+# Festival Buddies
 
-Festival Buddy is a Safari-installable web app for finding friends at EDC Las Vegas 2026. It combines the official EDC grid map, friend profile pins, optional live location sharing, schedule screenshot parsing, and a timeline slider so a private crew can quickly answer: where is everyone, what grid are they in, and who are they seeing next?
+Festival Buddies is a Safari-installable web app for finding friends at EDC Las Vegas 2026. It combines the official EDC grid map, friend profile pins, optional live location sharing, schedule screenshot parsing, and a timeline slider so a private crew can quickly answer: where is everyone, what grid are they in, and who are they seeing next?
 
 Open the live app:
 
@@ -8,7 +8,7 @@ https://festival-buddy.base44.app/
 
 ## Why It Exists
 
-EDC is huge, crowded, loud, and phone signal can be unreliable. Festival Buddy gives a friend group a lightweight map that works around that reality:
+EDC is huge, crowded, loud, and phone signal can be unreliable. Festival Buddies gives a friend group a lightweight map that works around that reality:
 
 - If live location is available, friends appear on the EDC grid map by their current location.
 - If signal is weak or GPS is missing, the app falls back to the person's uploaded schedule.
@@ -37,7 +37,7 @@ EDC is huge, crowded, loud, and phone signal can be unreliable. Festival Buddy g
 - Draggable friend and bucket pins so hidden pins can be moved aside and tapped.
 - Expanded map mode with a right-side crew list showing each friend's current grid.
 - Group manager tools so the person who created a group can remove people.
-- PWA support so the app can be saved to the iPhone home screen as Festival Buddy.
+- PWA support so the app can be saved to the iPhone home screen as F Buddies.
 - Service worker caching for a faster installable web-app experience.
 
 ## How Friends Use It
@@ -53,7 +53,7 @@ EDC is huge, crowded, loud, and phone signal can be unreliable. Festival Buddy g
 
 ## Schedule Upload
 
-The upload flow is built for screenshots exported from the Insomniac app schedule page. Friends can upload one or more screenshots, and Festival Buddy will try to detect:
+The upload flow is built for screenshots exported from the Insomniac app schedule page. Friends can upload one or more screenshots, and Festival Buddies will try to detect:
 
 - Day
 - Artist name
@@ -65,7 +65,7 @@ Uploading new schedule screenshots replaces the previous saved schedule for that
 
 ## Live Location And Offline Behavior
 
-Festival Buddy is designed to handle both live GPS and bad-signal festival conditions:
+Festival Buddies is designed to handle both live GPS and bad-signal festival conditions:
 
 - When Live Location is on and the phone has permission plus signal, the app maps GPS coordinates to the EDC grid.
 - When a user has no current signal, the app can show their last known location if it is still useful.
@@ -138,4 +138,4 @@ FestivalGPS/
 
 ## Current Status
 
-Festival Buddy is actively being tuned for EDC Las Vegas 2026 map accuracy, schedule parsing, iPhone Safari layout, and friend-group usability.
+Festival Buddies is actively being tuned for EDC Las Vegas 2026 map accuracy, schedule parsing, iPhone Safari layout, and friend-group usability.
