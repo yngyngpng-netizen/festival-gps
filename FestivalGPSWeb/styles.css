@@ -1472,12 +1472,13 @@ dialog::backdrop {
   }
 
   .topbar {
-    align-items: flex-start;
+    align-items: center;
   }
 
   .top-meta {
-    flex-direction: column;
-    align-items: flex-end;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
   }
 
   .group-code-chip {
@@ -1685,27 +1686,171 @@ dialog::backdrop {
 }
 
 @media (max-width: 430px) {
+  .app-shell {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
   .topbar {
-    gap: 8px;
+    margin: max(6px, env(safe-area-inset-top)) 8px 0;
+    padding: 6px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    border-radius: 16px;
+  }
+
+  .brand {
+    gap: 6px;
+    flex: 1 1 auto;
+    max-width: 30px;
   }
 
   .brand h1 {
-    font-size: 16px;
+    display: none;
+  }
+
+  .brand p {
+    display: none;
   }
 
   .brand-mark {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
+    font-size: 10px;
+  }
+
+  .top-meta {
+    flex: 0 0 auto;
+    gap: 5px;
+  }
+
+  .toolbar {
+    gap: 5px;
+  }
+
+  .group-code-chip {
+    min-height: 32px;
+    max-width: 96px;
+    padding: 3px 4px 3px 7px;
+    grid-template-columns: minmax(0, 1fr) 26px;
+    border-radius: 12px;
+  }
+
+  .group-code-chip span {
+    font-size: 8px;
+  }
+
+  .group-code-chip strong {
+    font-size: 10px;
+  }
+
+  .copy-mini {
+    width: 26px;
+    min-height: 26px;
+    border-radius: 10px;
   }
 
   .icon-button {
-    width: 36px;
-    height: 36px;
+    width: 31px;
+    height: 31px;
   }
 
   .icon-button svg {
-    width: 19px;
-    height: 19px;
+    width: 17px;
+    height: 17px;
+  }
+
+  .map-shell {
+    padding: 4px 8px;
+  }
+
+  .map {
+    width: min(92vw, 44svh, 430px);
+    border-radius: 18px;
+  }
+
+  .timeline-panel {
+    margin: 0 8px max(6px, env(safe-area-inset-bottom));
+    padding: 8px;
+    border-radius: 14px;
+  }
+
+  .now-card {
+    min-height: 0;
+    margin-bottom: 6px;
+    padding: 6px 8px;
+    grid-template-columns: minmax(54px, 0.72fr) minmax(0, 1.45fr);
+    gap: 8px;
+    align-items: center;
+  }
+
+  .now-card .eyebrow {
+    display: none;
+  }
+
+  .now-card > div {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .now-card strong,
+  .location-status,
+  .now-card > span {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .now-card strong {
+    flex: 0 1 auto;
+    font-size: 12px;
+  }
+
+  .location-status {
+    margin: 0;
+    flex: 1 1 auto;
+    font-size: 10px;
+  }
+
+  .now-card > span {
+    font-size: 10px;
+    text-align: right;
+  }
+
+  .timeline-row {
+    gap: 6px;
+  }
+
+  .segmented {
+    padding: 2px;
+    border-radius: 12px;
+  }
+
+  .segmented button {
+    min-height: 28px;
+    font-size: 11px;
+  }
+
+  .time-slider-wrap {
+    margin-top: 8px;
+    padding-top: 16px;
+  }
+
+  output {
+    top: -3px;
+    min-width: 58px;
+    padding: 3px 5px;
+    font-size: 10px;
+  }
+
+  .timeline-labels {
+    font-size: 9px;
+  }
+
+  .friend-strip {
+    display: none;
   }
 
   .stage-name {
@@ -1714,19 +1859,6 @@ dialog::backdrop {
     font-size: 8px;
   }
 
-  .friend-chip {
-    width: 162px;
-    flex-basis: 162px;
-  }
-
-  .now-card {
-    grid-template-columns: 1fr;
-  }
-
-  .now-card > span {
-    max-width: 100%;
-    text-align: left;
-  }
 }
 
 @media (max-width: 340px) {

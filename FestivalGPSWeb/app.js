@@ -1313,7 +1313,16 @@ function renderFriendDetail(friend = selectedFriend()) {
 function renderSelectedFriendSummary() {
   const selected = selectedFriend();
   els.selectedFriendName.textContent = selected.name || "Your crew";
-  els.selectedFriendStage.textContent = locationSourceText(selected);
+  els.selectedFriendStage.textContent = nextStopText(selected);
+}
+
+function nextStopText(friend) {
+  const next = friend.schedule
+    .filter((item) => item.day === state.selectedDay && item.start > state.selectedMinute)
+    .sort((a, b) => a.start - b.start)[0];
+
+  if (next) return `Next: ${next.artist}, ${stageById(next.stageId).name}`;
+  return locationSourceText(friend);
 }
 
 function renderAuthPhotoPreview(photo, name) {
