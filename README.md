@@ -4,7 +4,7 @@ Festival Buddy is a Safari-installable web app for finding friends at EDC Las Ve
 
 Open the live app:
 
-https://festival-gps-fa4c5235.base44.app/
+https://festival-buddy.base44.app/
 
 ## Why It Exists
 
@@ -42,7 +42,7 @@ EDC is huge, crowded, loud, and phone signal can be unreliable. Festival Buddy g
 
 ## How Friends Use It
 
-1. Open the app in Safari: https://festival-gps-fa4c5235.base44.app/
+1. Open the app in Safari: https://festival-buddy.base44.app/
 2. Enter a user name and create a 4-6 digit PIN.
 3. Start a new group or join with a friend's group code.
 4. Upload a profile photo.
