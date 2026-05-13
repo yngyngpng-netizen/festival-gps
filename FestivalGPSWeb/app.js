@@ -6,10 +6,16 @@ const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const EDC_GEO_MARGIN = 0.0015;
 const MAP_PIN_BOUNDS = {
-  minX: 0.06,
-  maxX: 0.69,
+  minX: 0.065,
+  maxX: 0.745,
+  minY: 0.12,
+  maxY: 0.955
+};
+const OFFICIAL_MAP_FRAME = {
+  minX: 0.075,
+  maxX: 0.735,
   minY: 0.13,
-  maxY: 0.92
+  maxY: 0.945
 };
 const EDC_GEO_BOUNDS = {
   north: 36.282,
@@ -766,7 +772,7 @@ function startLiveLocation(options = {}) {
     (error) => handleLiveLocationError(error, options),
     {
       enableHighAccuracy: true,
-      maximumAge: 30 * 1000,
+      maximumAge: 5 * 1000,
       timeout: 20 * 1000
     }
   );
@@ -794,7 +800,7 @@ function requestLocationPermissionOnEntry() {
     (error) => handleLiveLocationError(error, { quiet: true }),
     {
       enableHighAccuracy: true,
-      maximumAge: 30 * 1000,
+      maximumAge: 5 * 1000,
       timeout: 20 * 1000
     }
   );
@@ -2083,11 +2089,11 @@ function positionForFriend(friend, stage, groups) {
 }
 
 function screenPositionForStage(stage) {
-  return clampMapPosition(screenPositionForCoordinate(coordinateForNormalized(stage.x, stage.y)) || { x: stage.x, y: stage.y });
+  return clampMapPosition({ x: stage.x, y: stage.y });
 }
 
 function screenPositionForLiveLocation(live) {
-  return clampMapPosition(screenPositionForCoordinate({ lat: live.lat, lon: live.lon }) || {
+  return clampMapPosition({
     x: clamp(live.x, 0.04, 0.96),
     y: clamp(live.y, 0.06, 0.96)
   });
@@ -2189,11 +2195,13 @@ function nearestStageId(x, y) {
 }
 
 function geoX(lon) {
-  return clamp((lon - EDC_GEO_BOUNDS.west) / (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west), 0, 1);
+  const normalized = clamp((lon - EDC_GEO_BOUNDS.west) / (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west), 0, 1);
+  return OFFICIAL_MAP_FRAME.minX + normalized * (OFFICIAL_MAP_FRAME.maxX - OFFICIAL_MAP_FRAME.minX);
 }
 
 function geoY(lat) {
-  return clamp((EDC_GEO_BOUNDS.north - lat) / (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south), 0, 1);
+  const normalized = clamp((EDC_GEO_BOUNDS.north - lat) / (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south), 0, 1);
+  return OFFICIAL_MAP_FRAME.minY + normalized * (OFFICIAL_MAP_FRAME.maxY - OFFICIAL_MAP_FRAME.minY);
 }
 
 function relativeAge(updatedAt) {
