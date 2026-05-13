@@ -2505,7 +2505,11 @@ function renderExpandedFriendList() {
     const name = document.createElement("span");
     name.className = "expanded-friend-name";
     name.textContent = friend.name || "Friend";
-    row.append(name, gridBadgeElement(gridForFriend(friend), "expanded-grid-badge"));
+    row.append(
+      avatarElement(friend, "expanded-avatar"),
+      gridBadgeElement(gridForFriend(friend), "expanded-grid-badge"),
+      name
+    );
     els.expandedFriendList.append(row);
   });
 }

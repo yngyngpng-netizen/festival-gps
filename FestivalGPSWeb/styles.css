@@ -656,7 +656,7 @@ textarea {
 }
 
 .map {
-  --expanded-list-width: clamp(104px, 24vw, 188px);
+  --expanded-list-width: clamp(132px, 27vw, 212px);
   --expanded-list-gap: 8px;
   position: relative;
   width: min(96vw, 62svh, 660px);
@@ -1023,12 +1023,12 @@ textarea {
 
 .expanded-friend-row {
   min-width: 0;
-  min-height: 34px;
-  padding: 6px 7px;
+  min-height: 42px;
+  padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 7px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 28px auto minmax(0, 1fr);
   gap: 6px;
   align-items: center;
   background: rgba(255, 255, 255, 0.08);
@@ -1039,6 +1039,21 @@ textarea {
 .expanded-friend-row.active {
   border-color: var(--friend-color);
   box-shadow: 0 0 18px color-mix(in srgb, var(--friend-color), transparent 58%);
+}
+
+.expanded-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--friend-color);
+  border: 2px solid #ffffff;
+  color: #071017;
+  font-size: 9px;
+  font-weight: 950;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--friend-color), transparent 48%);
 }
 
 .expanded-friend-name {
@@ -1065,9 +1080,9 @@ textarea {
 }
 
 .expanded-grid-badge {
-  min-width: 30px;
-  padding: 5px 6px;
-  font-size: 11px;
+  min-width: 34px;
+  padding: 6px 6px;
+  font-size: 12px;
 }
 
 .stage-marker {
@@ -1416,6 +1431,7 @@ textarea {
 
 .pin-head img,
 .mini-avatar img,
+.expanded-avatar img,
 .large-avatar img,
 .bucket-small img {
   width: 100%;
