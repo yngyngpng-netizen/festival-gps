@@ -27,14 +27,16 @@
 
 html,
 body {
-  height: 100%;
+  min-height: 100%;
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 button,
@@ -49,13 +51,11 @@ button {
 }
 
 .onboarding {
-  position: fixed;
-  inset: 0;
+  position: relative;
   min-height: 100svh;
-  height: 100dvh;
+  min-height: 100dvh;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
   padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
   display: grid;
   place-items: center;
@@ -410,6 +410,7 @@ textarea {
 
 .app-shell {
   min-height: 100svh;
+  min-height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr auto;
   background:
@@ -1490,18 +1491,16 @@ dialog::backdrop {
 
 @media (max-width: 430px), (max-height: 760px) {
   .onboarding {
-    height: 100dvh;
-    overflow: hidden;
-    padding: max(8px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom));
+    min-height: 100dvh;
+    overflow-y: auto;
+    padding: max(8px, env(safe-area-inset-top)) 10px calc(max(8px, env(safe-area-inset-bottom)) + 18px);
     place-items: start center;
   }
 
   .auth-card {
     width: min(420px, 100%);
-    max-height: calc(100dvh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom)));
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
+    max-height: none;
+    overflow: visible;
     padding: 12px;
     gap: 9px;
     border-radius: 14px;
