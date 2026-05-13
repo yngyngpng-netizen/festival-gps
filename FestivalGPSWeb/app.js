@@ -1206,6 +1206,7 @@ function renderStages() {
   els.stageLayer.replaceChildren();
   stages.filter((stage) => stage.id !== "speedway-entry").forEach((stage) => {
     const position = screenPositionForStage(stage);
+    const now = stageNowSummary(stage);
     const marker = document.createElement("div");
     marker.className = "stage-marker";
     marker.style.left = `${position.x * 100}%`;
@@ -1219,10 +1220,48 @@ function renderStages() {
     const name = document.createElement("span");
     name.className = "stage-name";
     name.textContent = stage.name;
+    const artist = document.createElement("span");
+    artist.className = "stage-artist";
+    artist.hidden = !now;
+    if (now) {
+      artist.textContent = now.label;
+      artist.title = now.title;
+    }
 
-    marker.append(photo, name);
+    marker.append(photo, name, artist);
     els.stageLayer.append(marker);
   });
+}
+
+function stageNowSummary(stage) {
+  if (!state.user || !state.friends.length) return null;
+
+  const matches = state.friends.flatMap((friend) => (
+    friend.schedule
+      .filter((item) => item.day === state.selectedDay && item.stageId === stage.id && item.start <= state.selectedMinute && state.selectedMinute <= item.end)
+      .map((item) => ({ friend, item }))
+  ));
+  if (!matches.length) return null;
+
+  const artistCounts = new Map();
+  const friendNames = new Set();
+  matches.forEach(({ friend, item }) => {
+    const artist = item.artist || "Current set";
+    artistCounts.set(artist, (artistCounts.get(artist) || 0) + 1);
+    friendNames.add(friend.name || "Friend");
+  });
+
+  const artists = [...artistCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([artist]) => artist);
+  const visibleArtists = artists.slice(0, 2).join(", ");
+  const moreArtists = artists.length > 2 ? ` +${artists.length - 2}` : "";
+  const friendsText = friendNames.size === 1 ? "1 friend" : `${friendNames.size} friends`;
+
+  return {
+    label: `${visibleArtists}${moreArtists} · ${friendsText}`,
+    title: `${artists.join(", ")} - ${[...friendNames].join(", ")}`
+  };
 }
 
 function renderRoutes() {

@@ -184,6 +184,18 @@ p {
   letter-spacing: 0;
 }
 
+.friend-note {
+  margin: -4px 0 -6px;
+  width: fit-content;
+  padding: 7px 10px;
+  border: 1px solid rgba(0, 122, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: rgba(17, 17, 20, 0.72);
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .auth-copy {
   color: var(--muted);
   font-size: 15px;
@@ -939,6 +951,30 @@ textarea {
   line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: normal;
+}
+
+.stage-artist {
+  display: inline-block;
+  max-width: 112px;
+  margin-top: 3px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(5, 7, 18, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  color: #ffffff;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px rgba(31, 35, 45, 0.18);
+}
+
+.map.expanded .stage-artist {
+  max-width: 148px;
+  font-size: 10px;
   white-space: normal;
 }
 
@@ -1706,6 +1742,13 @@ dialog::backdrop {
     line-height: 1.3;
   }
 
+  .friend-note {
+    margin: -2px 0 -4px;
+    padding: 6px 9px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
   .auth-grid,
   .field-stack,
   .friend-list,
@@ -1955,9 +1998,9 @@ dialog::backdrop {
     min-height: 0;
     margin-bottom: 6px;
     padding: 6px 8px;
-    grid-template-columns: minmax(54px, 0.72fr) minmax(0, 1.45fr);
-    gap: 8px;
-    align-items: center;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    align-items: start;
   }
 
   .now-card .eyebrow {
@@ -1966,18 +2009,18 @@ dialog::backdrop {
 
   .now-card > div {
     min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    display: grid;
+    gap: 2px;
   }
 
   .now-card strong,
   .location-status,
   .now-card > span {
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.15;
   }
 
   .now-card strong {
@@ -1987,13 +2030,12 @@ dialog::backdrop {
 
   .location-status {
     margin: 0;
-    flex: 1 1 auto;
     font-size: 10px;
   }
 
   .now-card > span {
     font-size: 10px;
-    text-align: right;
+    text-align: left;
   }
 
   .timeline-row {
@@ -2058,6 +2100,12 @@ dialog::backdrop {
     max-width: 82px;
     padding: 3px 5px;
     font-size: 8px;
+  }
+
+  .stage-artist {
+    max-width: 92px;
+    padding: 2px 5px;
+    font-size: 7px;
   }
 
   .friend-pin {
