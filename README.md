@@ -141,19 +141,43 @@ FestivalGPS/
 Copy and paste this:
 
 ```text
-I made a private EDC friend-finder app called Festival Buddy:
+Hello, it's Yang.
+
+I made an app for EDC to help friends find each other when we get lost at the festival by combining schedule sharing and live location sharing.
+
 https://festival-gps-fa4c5235.base44.app/
 
-It lets our group see everyone's pin on the EDC grid map, upload our Insomniac schedule screenshots, and use a timeline to see where people should be at each time. If live location works, it shows your real grid location. If signal is bad, it falls back to your last location or your uploaded schedule.
+The app is tuned for EDC, where phone signal can be bad. Unlike Find My, which can turn grey or stop updating when there is no signal, this app can still help by using a friend's last live location update or their scheduled stage location when they go offline.
+
+It also helps us form smaller groups throughout the night based on the artists and stages people plan to see together.
+
+You can save it to your iPhone Home Screen so it feels more like a native app during the festival.
+
+Group code: EDC-WTG-NS2
 
 How to join:
 1. Open the link in Safari.
 2. Enter your user name.
 3. Create a simple 4-6 digit PIN so you can log back in.
-4. Join with our group code: [PASTE GROUP CODE HERE]
-5. Upload a profile pic and your schedule screenshots.
-6. Tap Live Location if you want us to see your current grid.
-7. Save it to your home screen: Share > Add to Home Screen.
+4. Join with the group code above.
+5. Upload a profile picture.
+6. Save it to your Home Screen: Share > Add to Home Screen.
+
+Schedule setup:
+1. Open the Insomniac app.
+2. Select the artists you want to see.
+3. Save your schedule list as an image using the share/save feature.
+4. Open Festival Buddy and tap the picture/schedule button on the top right to upload your schedule image.
+
+Features:
+- View everyone's schedules in the group.
+- See which friends are going to the same artists and stages.
+- Form groups based on similar schedules.
+- Drag the timeline bar to watch everyone's pins move across the map throughout the night.
+- Tap Live Location to see everyone's latest shared location.
+- Tap a friend's pin to view their full schedule.
+- If someone loses signal, the app falls back to their last live location update or scheduled stage location.
+- If a live location has not updated for over 30 minutes, the app automatically switches to scheduled stage tracking.
 
 This is just for friends. If anything is confusing, ask Yang.
 ```
