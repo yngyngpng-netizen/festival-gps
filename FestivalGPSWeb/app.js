@@ -8,6 +8,9 @@ const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
 const PIN_BUCKET_THRESHOLD = 3;
 const PIN_DRAG_THRESHOLD_PX = 6;
+const FRIEND_STRIP_RENDER_LIMIT = 80;
+const GROUP_REFRESH_DEBOUNCE_MS = 2500;
+const GROUP_RENDER_DEBOUNCE_MS = 400;
 const EDC_GEO_MARGIN = 0.00035;
 const MAP_PIN_BOUNDS = {
   minX: 0.045,
@@ -241,6 +244,8 @@ let pendingInitialPosition = null;
 let selectedStageId = "";
 let selectedBucketId = "";
 let activePinDrag = null;
+let groupRefreshTimer = null;
+let groupRenderTimer = null;
 const pinDragOffsets = new Map();
 const artistImageCache = new Map();
 const artistImagePending = new Map();
@@ -829,14 +834,72 @@ async function enterBase44GroupByName(groupCode, profile, pin) {
 
 async function subscribeToBase44Group(groupCode) {
   if (services.unsubscribeGroup) services.unsubscribeGroup();
+  window.clearTimeout(groupRefreshTimer);
+  window.clearTimeout(groupRenderTimer);
+  groupRefreshTimer = null;
+  groupRenderTimer = null;
 
   await refreshBase44Group(groupCode);
 
   services.unsubscribeGroup = services.base44.entities.CrewMember.subscribe((event) => {
-    if (!event?.data?.groupCode || event.data.groupCode === groupCode) {
-      refreshBase44Group(groupCode);
-    }
+    handleBase44CrewEvent(event, groupCode);
   });
+}
+
+function handleBase44CrewEvent(event, groupCode) {
+  const data = event?.data;
+  if (data?.groupCode && data.groupCode !== groupCode) return;
+  if (!data?.id) {
+    scheduleGroupRefresh(groupCode);
+    return;
+  }
+
+  const member = normalizeMember(data);
+  if (member.groupCode && member.groupCode !== groupCode) return;
+
+  if (isRemovedMember(member) && (
+    member.id === state.user?.id ||
+    (member.userId && member.userId === state.user?.userId)
+  )) {
+    signOutUser({ message: "You were removed from that group. Ask the group manager if this was a mistake." });
+    return;
+  }
+
+  applyCrewMemberUpdate(member);
+  scheduleGroupRender();
+}
+
+function scheduleGroupRefresh(groupCode) {
+  window.clearTimeout(groupRefreshTimer);
+  groupRefreshTimer = window.setTimeout(() => {
+    groupRefreshTimer = null;
+    refreshBase44Group(groupCode);
+  }, GROUP_REFRESH_DEBOUNCE_MS);
+}
+
+function scheduleGroupRender() {
+  if (groupRenderTimer) return;
+  groupRenderTimer = window.setTimeout(() => {
+    groupRenderTimer = null;
+    cacheCurrentGroup();
+    renderAuthGate();
+  }, GROUP_RENDER_DEBOUNCE_MS);
+}
+
+function applyCrewMemberUpdate(member) {
+  if (!member?.id) return;
+
+  const nextFriends = state.friends.filter((friend) => friend.id !== member.id);
+  if (!isRemovedMember(member)) nextFriends.push(member);
+  state.friends = nextFriends.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  if (member.id === state.user?.id || (member.userId && member.userId === state.user?.userId)) {
+    state.user = isRemovedMember(member) ? state.user : member;
+  }
+
+  if (selectedFriendId && !state.friends.some((friend) => friend.id === selectedFriendId)) {
+    selectedFriendId = state.user?.id || state.friends[0]?.id || "";
+  }
 }
 
 async function refreshBase44Group(groupCode) {
@@ -907,7 +970,7 @@ async function persistCurrentMember(options = {}) {
     });
     const saved = await services.base44.entities.CrewMember.update(user.id, updated);
     state.user = normalizeMember(saved);
-    await refreshBase44Group(state.groupCode);
+    applyCrewMemberUpdate(state.user);
   } else {
     const group = localStore.groups[state.groupCode] || { code: state.groupCode, members: {} };
     group.members[user.id] = normalizeMember(user);
@@ -958,14 +1021,16 @@ async function removeFriendFromGroup(friendId) {
   const removedAt = new Date().toISOString();
   try {
     if (services.provider === "base44") {
-      await services.base44.entities.CrewMember.update(target.id, sanitizeMember({
+      const removed = await services.base44.entities.CrewMember.update(target.id, sanitizeMember({
         ...target,
         liveLocation: null,
         removedAt,
         removedBy: state.user.id,
         updatedAt: removedAt
       }));
-      await refreshBase44Group(state.groupCode);
+      applyCrewMemberUpdate(normalizeMember(removed));
+      cacheCurrentGroup();
+      renderAll();
     } else {
       const group = localStore.groups[state.groupCode] || { code: state.groupCode, members: {} };
       group.members[target.id] = normalizeMember({
@@ -1387,6 +1452,7 @@ function setMapExpanded(expanded) {
   els.map.setAttribute("aria-expanded", String(expanded));
   els.mapExpandButton.hidden = expanded;
   els.mapCloseButton.hidden = !expanded;
+  renderExpandedFriendList();
   window.setTimeout(syncMapOverlays, 80);
 }
 
@@ -1680,11 +1746,16 @@ function renderPins() {
     if (!activeBucketIds.has(bucket.dataset.bucketId)) bucket.remove();
   });
 
+  const friendPinById = new Map([...els.pinLayer.querySelectorAll(".friend-pin")]
+    .map((pin) => [pin.dataset.friendId, pin]));
+  const bucketPinById = new Map([...els.pinLayer.querySelectorAll(".bucket-pin")]
+    .map((pin) => [pin.dataset.bucketId, pin]));
+
   layout.singles.forEach(({ friend, position, grid }) => {
     const previous = lastPinPositions.get(friend.id);
     const isMoving = Boolean(previous && Math.hypot(previous.x - position.x, previous.y - position.y) > 0.01);
     const dragKey = `friend:${friend.id}`;
-    let pin = els.pinLayer.querySelector(`[data-friend-id="${cssEscape(friend.id)}"]`);
+    let pin = friendPinById.get(friend.id);
     const isNew = !pin;
 
     if (!pin) {
@@ -1762,7 +1833,7 @@ function renderPins() {
     const key = `bucket:${bucket.id}`;
     const previous = lastPinPositions.get(key) || previousBucketPosition(bucket);
     const isMoving = Boolean(previous && Math.hypot(previous.x - bucket.position.x, previous.y - bucket.position.y) > 0.01);
-    let pin = els.pinLayer.querySelector(`[data-bucket-id="${cssEscape(bucket.id)}"]`);
+    let pin = bucketPinById.get(bucket.id);
     const isNew = !pin;
 
     if (!pin) {
@@ -1958,7 +2029,7 @@ function positionFromPinElement(pin) {
 function renderFriendStrip() {
   els.friendStrip.replaceChildren();
 
-  state.friends.forEach((friend) => {
+  friendStripMembers().forEach((friend) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "friend-chip";
@@ -1984,6 +2055,21 @@ function renderFriendStrip() {
     chip.append(avatarElement(friend, "mini-avatar"), copy);
     els.friendStrip.append(chip);
   });
+}
+
+function friendStripMembers() {
+  if (state.friends.length <= FRIEND_STRIP_RENDER_LIMIT) return state.friends;
+
+  const priority = [selectedFriend(), currentUser()].filter((friend) => friend?.id);
+  const seen = new Set();
+  const output = [];
+  priority.concat(state.friends).some((friend) => {
+    if (!friend?.id || seen.has(friend.id)) return false;
+    seen.add(friend.id);
+    output.push(friend);
+    return output.length >= FRIEND_STRIP_RENDER_LIMIT;
+  });
+  return output;
 }
 
 function renderFriendList(target = els.friendList, options = {}) {
@@ -2236,6 +2322,10 @@ function renderSelectedFriendSummary() {
 
 function renderExpandedFriendList() {
   if (!els.expandedFriendList) return;
+  if (!els.map.classList.contains("expanded")) {
+    els.expandedFriendList.replaceChildren();
+    return;
+  }
 
   els.expandedFriendList.replaceChildren();
   const title = document.createElement("strong");
@@ -3713,7 +3803,37 @@ function saveLocalStore() {
   localStore.selectedDay = state.selectedDay;
   localStore.selectedMinute = state.selectedMinute;
   localStore.currentLocationMode = currentLocationMode;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(localStore));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(localStore));
+  } catch {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(leanLocalStore(localStore)));
+    } catch {
+      // Keep the in-memory group alive even if the browser storage quota is full.
+    }
+  }
+}
+
+function leanLocalStore(store) {
+  const groups = {};
+  Object.entries(store.groups || {}).forEach(([code, group]) => {
+    const members = {};
+    Object.entries(group.members || {}).forEach(([id, member]) => {
+      members[id] = {
+        ...member,
+        photo: ""
+      };
+    });
+    groups[code] = {
+      ...group,
+      members
+    };
+  });
+
+  return {
+    ...store,
+    groups
+  };
 }
 
 function cacheCurrentGroup() {
