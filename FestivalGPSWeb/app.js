@@ -7,7 +7,7 @@ const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
 const PIN_BUCKET_THRESHOLD = 3;
-const EDC_GEO_MARGIN = 0.0015;
+const EDC_GEO_MARGIN = 0.00035;
 const MAP_PIN_BOUNDS = {
   minX: 0.045,
   maxX: 0.742,
@@ -29,22 +29,73 @@ const MAP_GRID = {
   maxY: 0.936
 };
 const EDC_GEO_BOUNDS = {
-  north: 36.279,
-  south: 36.2585,
-  west: -115.024,
-  east: -115.002
-};
-const EDC_INFIELD_OVAL = {
-  centerX: 0.5,
-  centerY: 0.52,
-  radiusX: 0.58,
-  radiusY: 0.6,
-  tolerance: 1.18
+  north: 36.2770742,
+  south: 36.2654495,
+  west: -115.0163942,
+  east: -115.0017109
 };
 const EDC_CENTER = {
   lat: (EDC_GEO_BOUNDS.north + EDC_GEO_BOUNDS.south) / 2,
   lon: (EDC_GEO_BOUNDS.west + EDC_GEO_BOUNDS.east) / 2
 };
+const EDC_GEO_POLYGON = [
+  { lon: -115.0163942, lat: 36.2707411 },
+  { lon: -115.0163248, lat: 36.2702104 },
+  { lon: -115.0161589, lat: 36.2697504 },
+  { lon: -115.015913, lat: 36.2692859 },
+  { lon: -115.0155763, lat: 36.2688651 },
+  { lon: -115.0151513, lat: 36.2684786 },
+  { lon: -115.0146189, lat: 36.2681141 },
+  { lon: -115.0142111, lat: 36.2678077 },
+  { lon: -115.013404, lat: 36.2669562 },
+  { lon: -115.0121568, lat: 36.2655194 },
+  { lon: -115.0120249, lat: 36.2654495 },
+  { lon: -115.0118933, lat: 36.2654612 },
+  { lon: -115.0017109, lat: 36.2716334 },
+  { lon: -115.0048341, lat: 36.2751385 },
+  { lon: -115.0052525, lat: 36.2755833 },
+  { lon: -115.005555, lat: 36.275843 },
+  { lon: -115.0059528, lat: 36.2761208 },
+  { lon: -115.0062162, lat: 36.2762753 },
+  { lon: -115.0064887, lat: 36.2764129 },
+  { lon: -115.006678, lat: 36.276501 },
+  { lon: -115.0068788, lat: 36.2765836 },
+  { lon: -115.0071433, lat: 36.2766748 },
+  { lon: -115.0076017, lat: 36.2768073 },
+  { lon: -115.007977, lat: 36.2768831 },
+  { lon: -115.0082086, lat: 36.2769222 },
+  { lon: -115.0083236, lat: 36.2769329 },
+  { lon: -115.0085832, lat: 36.2769593 },
+  { lon: -115.0088742, lat: 36.2769747 },
+  { lon: -115.009731, lat: 36.2769713 },
+  { lon: -115.0104888, lat: 36.2769599 },
+  { lon: -115.0110861, lat: 36.2769499 },
+  { lon: -115.0112513, lat: 36.2769549 },
+  { lon: -115.0128231, lat: 36.2769497 },
+  { lon: -115.014394, lat: 36.2769311 },
+  { lon: -115.0149327, lat: 36.2769845 },
+  { lon: -115.0155235, lat: 36.2770742 },
+  { lon: -115.0155796, lat: 36.2770596 },
+  { lon: -115.0156188, lat: 36.2770408 },
+  { lon: -115.0156556, lat: 36.2770002 },
+  { lon: -115.0156902, lat: 36.2769247 },
+  { lon: -115.015771, lat: 36.2766237 },
+  { lon: -115.0157997, lat: 36.2764091 },
+  { lon: -115.0158184, lat: 36.2761294 },
+  { lon: -115.0158068, lat: 36.2753271 },
+  { lon: -115.0157886, lat: 36.2735973 },
+  { lon: -115.0158676, lat: 36.2732193 },
+  { lon: -115.0161365, lat: 36.2726833 },
+  { lon: -115.0163195, lat: 36.2722226 },
+  { lon: -115.0163764, lat: 36.2716953 }
+];
+const EDC_GRID_GEO_CORNERS = {
+  topLeft: { lon: -115.0155235, lat: 36.2770742 },
+  topRight: { lon: -115.0017109, lat: 36.2716334 },
+  bottomRight: { lon: -115.0120249, lat: 36.2654495 },
+  bottomLeft: { lon: -115.0163942, lat: 36.2707411 }
+};
+const GEO_X_SCALE = Math.cos(EDC_CENTER.lat * Math.PI / 180);
 const MAPKIT_JS_URL = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js";
 
 const days = {
@@ -204,6 +255,7 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   bindElements();
   registerServiceWorker();
+  hideBase44EditBadge();
   renderDayButtons();
   renderStages();
   bindEvents();
@@ -211,6 +263,75 @@ async function init() {
   await initCloud();
   hydrateLocalSession();
   renderAuthGate();
+}
+
+function hideBase44EditBadge() {
+  const selectors = "a, button, div, span, iframe";
+  let scanQueued = false;
+
+  const queueScan = () => {
+    if (scanQueued) return;
+    scanQueued = true;
+    requestAnimationFrame(() => {
+      scanQueued = false;
+      scan();
+    });
+  };
+
+  const scan = (root = document) => {
+    root.querySelectorAll?.(selectors).forEach((node) => {
+      if (node.shadowRoot) scan(node.shadowRoot);
+      if (isBase44EditBadge(node)) hideInjectedBadge(node);
+    });
+  };
+
+  const observer = new MutationObserver(queueScan);
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["aria-label", "class", "href", "src", "style", "title"]
+  });
+
+  scan();
+  window.setTimeout(scan, 800);
+  window.setTimeout(scan, 2400);
+}
+
+function isBase44EditBadge(node) {
+  if (!node || node.dataset?.festivalHideBase44 === "true") return false;
+
+  const label = [
+    node.textContent,
+    node.getAttribute?.("aria-label"),
+    node.getAttribute?.("title"),
+    node.getAttribute?.("href"),
+    node.getAttribute?.("src"),
+    node.id,
+    node.className
+  ].map((value) => String(value || "")).join(" ").toLowerCase();
+
+  if (!label.includes("base44")) return false;
+
+  const hasEditText = label.includes("edit") || label.includes("remix") || label.includes("builder");
+  const rect = typeof node.getBoundingClientRect === "function" ? node.getBoundingClientRect() : null;
+  const style = node instanceof HTMLElement ? getComputedStyle(node) : null;
+  const floating = style && ["fixed", "absolute", "sticky"].includes(style.position);
+  const small = rect && rect.width <= 260 && rect.height <= 120;
+  const bottomRight = rect
+    && rect.right >= window.innerWidth - 280
+    && rect.bottom >= window.innerHeight - 180;
+  const iframeBadge = node.tagName === "IFRAME" && label.includes("base44") && floating && bottomRight;
+
+  return Boolean((hasEditText && (floating || bottomRight || small)) || iframeBadge);
+}
+
+function hideInjectedBadge(node) {
+  node.dataset.festivalHideBase44 = "true";
+  node.setAttribute("aria-hidden", "true");
+  node.style.setProperty("display", "none", "important");
+  node.style.setProperty("visibility", "hidden", "important");
+  node.style.setProperty("pointer-events", "none", "important");
 }
 
 function bindElements() {
@@ -974,8 +1095,6 @@ async function handleLivePosition(position) {
     lat,
     lon,
     accuracy,
-    x: geoX(lon),
-    y: geoY(lat),
     updatedAt: new Date(position.timestamp || Date.now()).toISOString(),
     online: navigator.onLine,
     source: "gps"
@@ -1349,55 +1468,91 @@ function minuteForFestivalClock(now) {
 }
 
 function renderStages() {
-  els.stageLayer.replaceChildren();
+  const activeIds = new Set(stages.filter((stage) => stage.id !== "speedway-entry").map((stage) => stage.id));
+  [...els.stageLayer.querySelectorAll(".stage-marker")].forEach((marker) => {
+    if (!activeIds.has(marker.dataset.stageId)) marker.remove();
+  });
+
   stages.filter((stage) => stage.id !== "speedway-entry").forEach((stage) => {
     const position = screenPositionForStage(stage);
     const now = stageNowSummary(stage);
-    const marker = document.createElement("button");
-    marker.type = "button";
-    marker.className = "stage-marker";
+    let marker = els.stageLayer.querySelector(`[data-stage-id="${cssEscape(stage.id)}"]`);
+
+    if (!marker) {
+      marker = document.createElement("button");
+      marker.type = "button";
+      marker.className = "stage-marker";
+      marker.dataset.stageId = stage.id;
+      marker.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectedStageId = stage.id;
+        renderStageDetail(stage);
+        openDialog(els.stageDetailDialog);
+      });
+      marker.append(
+        Object.assign(document.createElement("span"), { className: "stage-photo" }),
+        Object.assign(document.createElement("span"), { className: "stage-name" }),
+        Object.assign(document.createElement("span"), { className: "stage-artist" })
+      );
+      els.stageLayer.append(marker);
+    }
+
     marker.style.left = `${position.x * 100}%`;
     marker.style.top = `${position.y * 100}%`;
     marker.style.setProperty("--stage-color", stage.color);
     marker.style.setProperty("--stage-art", stage.art);
     marker.setAttribute("aria-label", now ? `${stage.name}, ${now.title}` : stage.name);
-    marker.addEventListener("click", (event) => {
-      event.stopPropagation();
-      selectedStageId = stage.id;
-      renderStageDetail(stage);
-      openDialog(els.stageDetailDialog);
-    });
 
-    const photo = document.createElement("span");
-    photo.className = "stage-photo";
-    if (now?.artist) {
-      photo.classList.add("artist-active");
-      photo.title = now.artist;
-      photo.style.setProperty("--stage-art", artistGradient(now.artist, stage.color));
-      requestArtistImage(now.artist);
-      const image = document.createElement("img");
-      image.src = artistImageUrl(now.artist);
-      image.alt = now.artist;
-      image.loading = "lazy";
-      image.addEventListener("error", () => image.remove(), { once: true });
-      photo.append(image);
-    } else {
-      photo.textContent = stage.short || "";
-    }
-    const name = document.createElement("span");
-    name.className = "stage-name";
+    const photo = marker.querySelector(".stage-photo");
+    const name = marker.querySelector(".stage-name");
+    const artist = marker.querySelector(".stage-artist");
+    refreshStagePhoto(photo, stage, now);
     name.textContent = stage.name;
-    const artist = document.createElement("span");
-    artist.className = "stage-artist";
     artist.hidden = !now;
     if (now) {
       artist.textContent = now.label;
       artist.title = now.title;
+    } else {
+      artist.textContent = "";
+      artist.title = "";
     }
-
-    marker.append(photo, name, artist);
-    els.stageLayer.append(marker);
   });
+}
+
+function refreshStagePhoto(photo, stage, now) {
+  const artist = now?.artist || "";
+  photo.classList.toggle("artist-active", Boolean(artist));
+  photo.title = artist;
+  photo.style.setProperty("--stage-art", artist ? artistGradient(artist, stage.color) : stage.art);
+
+  if (!artist) {
+    photo.dataset.artist = "";
+    photo.dataset.image = "";
+    if (photo.textContent !== stage.short || photo.children.length) photo.replaceChildren(stage.short || "");
+    return;
+  }
+
+  requestArtistImage(artist);
+  const imageUrl = artistImageUrl(artist);
+  let image = photo.querySelector("img");
+
+  if (!image) {
+    photo.replaceChildren();
+    image = document.createElement("img");
+    image.loading = "lazy";
+    image.addEventListener("error", () => {
+      image.hidden = true;
+    });
+    photo.append(image);
+  }
+
+  image.hidden = false;
+  image.alt = artist;
+  if (photo.dataset.artist !== artist || photo.dataset.image !== imageUrl) {
+    photo.dataset.artist = artist;
+    photo.dataset.image = imageUrl;
+    image.src = imageUrl;
+  }
 }
 
 function stageNowSummary(stage) {
@@ -1550,8 +1705,18 @@ function renderPins() {
     refreshAvatarElement(avatar, friend);
 
     if (isNew) {
-      pin.style.left = `${position.x * 100}%`;
-      pin.style.top = `${position.y * 100}%`;
+      const start = previous || position;
+      pin.style.left = `${start.x * 100}%`;
+      pin.style.top = `${start.y * 100}%`;
+      if (previous) {
+        pin.classList.add("walking");
+        window.clearTimeout(pin._walkTimer);
+        pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
+        requestAnimationFrame(() => {
+          pin.style.left = `${position.x * 100}%`;
+          pin.style.top = `${position.y * 100}%`;
+        });
+      }
     } else {
       pin.classList.toggle("walking", isMoving);
       if (isMoving) {
@@ -1569,7 +1734,7 @@ function renderPins() {
 
   layout.buckets.forEach((bucket) => {
     const key = `bucket:${bucket.id}`;
-    const previous = lastPinPositions.get(key);
+    const previous = lastPinPositions.get(key) || previousBucketPosition(bucket);
     const isMoving = Boolean(previous && Math.hypot(previous.x - bucket.position.x, previous.y - bucket.position.y) > 0.01);
     let pin = els.pinLayer.querySelector(`[data-bucket-id="${cssEscape(bucket.id)}"]`);
     const isNew = !pin;
@@ -1627,8 +1792,18 @@ function renderPins() {
     refreshAvatarElement(smallTwo, previewFriends[1] || bucket.friends[0]);
 
     if (isNew) {
-      pin.style.left = `${bucket.position.x * 100}%`;
-      pin.style.top = `${bucket.position.y * 100}%`;
+      const start = previous || bucket.position;
+      pin.style.left = `${start.x * 100}%`;
+      pin.style.top = `${start.y * 100}%`;
+      if (previous) {
+        pin.classList.add("walking");
+        window.clearTimeout(pin._walkTimer);
+        pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
+        requestAnimationFrame(() => {
+          pin.style.left = `${bucket.position.x * 100}%`;
+          pin.style.top = `${bucket.position.y * 100}%`;
+        });
+      }
     } else {
       pin.classList.toggle("walking", isMoving);
       if (isMoving) {
@@ -1642,9 +1817,17 @@ function renderPins() {
     }
 
     nextPositions.set(key, bucket.position);
+    bucket.friends.forEach((friend) => nextPositions.set(friend.id, bucket.position));
   });
 
   lastPinPositions = nextPositions;
+}
+
+function previousBucketPosition(bucket) {
+  const positions = bucket.friends
+    .map((friend) => lastPinPositions.get(friend.id))
+    .filter(Boolean);
+  return positions.length ? averagePosition(positions) : null;
 }
 
 function renderFriendStrip() {
@@ -1775,10 +1958,12 @@ function renderBucketDetail(bucket = null) {
     const status = document.createElement("span");
     status.className = "chip-status";
     status.textContent = statusText(friend);
+    const friendGrid = gridForFriend(friend);
     const grid = document.createElement("span");
     grid.className = "bucket-row-grid";
-    grid.textContent = gridForFriend(friend);
+    grid.textContent = friendGrid;
 
+    name.append(` · ${friendGrid}`);
     copy.append(name, status);
     row.append(avatarElement(friend, "mini-avatar"), copy, grid);
     els.bucketList.append(row);
@@ -2666,6 +2851,8 @@ function statusText(friend) {
       const prefix = lastKnown.outsideVenue ? "Outside venue" : "Last seen";
       return `${prefix}: ${stageById(lastKnown.stageId).name}`;
     }
+    const active = activeEvent(friend);
+    if (active) return `No signal: ${active.artist}, ${stageById(active.stageId).name}`;
     return "No live GPS: Speedway Entry";
   }
 
@@ -2710,7 +2897,8 @@ function pinLayout() {
     const stage = stageForFriend(friend);
     const basePosition = basePositionForFriend(friend, stage);
     const grid = gridForPosition(basePosition);
-    const id = currentLocationMode ? `${stage.id}-${grid}` : stage.id;
+    const live = currentLocationMode && liveLocationForFriend(friend);
+    const id = live ? `${stage.id}-${grid}` : stage.id;
     const existing = groups.get(id) || {
       id,
       stage,
@@ -2867,10 +3055,9 @@ function screenPositionForCoordinate(coordinate) {
 }
 
 function coordinateForNormalized(x, y) {
-  return {
-    lat: EDC_GEO_BOUNDS.north - clamp(y, 0, 1) * (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south),
-    lon: EDC_GEO_BOUNDS.west + clamp(x, 0, 1) * (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west)
-  };
+  const u = (clamp(x, MAP_GRID.minX, MAP_GRID.maxX) - MAP_GRID.minX) / (MAP_GRID.maxX - MAP_GRID.minX);
+  const v = (clamp(y, MAP_GRID.minY, MAP_GRID.maxY) - MAP_GRID.minY) / (MAP_GRID.maxY - MAP_GRID.minY);
+  return unprojectGeoPoint(bilinearPoint(geoCorner("topLeft"), geoCorner("topRight"), geoCorner("bottomRight"), geoCorner("bottomLeft"), u, v));
 }
 
 function clampMapPosition(position) {
@@ -2948,11 +3135,14 @@ function normalizeLiveLocation(value) {
 
   if (![lat, lon].every(Number.isFinite) || !updatedAt) return null;
 
-  const insideFestival = coordinateWithinEdc(lat, lon, value.accuracy);
+  const mappedPosition = mapPositionForCoordinate(lat, lon);
+  const insideFestival = coordinateWithinEdc(lat, lon, value.accuracy) && Boolean(mappedPosition);
   const outsideVenue = value.outsideVenue === true || value.source === "outside-gate" || !insideFestival;
   const gate = stageById("speedway-entry");
-  const rawX = Number(value.x ?? geoX(lon));
-  const rawY = Number(value.y ?? geoY(lat));
+  const legacyX = Number(value.x);
+  const legacyY = Number(value.y);
+  const rawX = mappedPosition?.x ?? legacyX;
+  const rawY = mappedPosition?.y ?? legacyY;
   const x = outsideVenue ? gate.x : rawX;
   const y = outsideVenue ? gate.y : rawY;
   if (![x, y].every(Number.isFinite)) return null;
@@ -2974,7 +3164,7 @@ function normalizeLiveLocation(value) {
 
 function coordinateWithinEdc(lat, lon, accuracy = 0) {
   if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) return false;
-  const accuracyMargin = Number.isFinite(Number(accuracy)) ? Math.min(0.006, Math.max(0, Number(accuracy) / 111000)) : 0;
+  const accuracyMargin = Number.isFinite(Number(accuracy)) ? Math.min(0.002, Math.max(0, Number(accuracy) / 111000)) : 0;
   const margin = Math.max(EDC_GEO_MARGIN, accuracyMargin);
   const inBounds = lat >= EDC_GEO_BOUNDS.south - margin
     && lat <= EDC_GEO_BOUNDS.north + margin
@@ -2982,12 +3172,8 @@ function coordinateWithinEdc(lat, lon, accuracy = 0) {
     && lon <= EDC_GEO_BOUNDS.east + margin;
   if (!inBounds) return false;
 
-  const normalized = normalizedGeoPoint(lat, lon);
-  const ovalScore = (
-    ((normalized.x - EDC_INFIELD_OVAL.centerX) / EDC_INFIELD_OVAL.radiusX) ** 2 +
-    ((normalized.y - EDC_INFIELD_OVAL.centerY) / EDC_INFIELD_OVAL.radiusY) ** 2
-  );
-  return ovalScore <= EDC_INFIELD_OVAL.tolerance || accuracyMargin > 0.0025;
+  return pointInGeoPolygon({ lat, lon }, EDC_GEO_POLYGON)
+    || distanceToGeoPolygon({ lat, lon }, EDC_GEO_POLYGON) <= margin;
 }
 
 function nearestStageId(x, y) {
@@ -3001,19 +3187,125 @@ function nearestStageId(x, y) {
 }
 
 function geoX(lon) {
-  const normalized = clamp(normalizedGeoPoint(EDC_CENTER.lat, lon).x, 0, 1);
-  return OFFICIAL_MAP_FRAME.minX + normalized * (OFFICIAL_MAP_FRAME.maxX - OFFICIAL_MAP_FRAME.minX);
+  return mapPositionForCoordinate(EDC_CENTER.lat, lon)?.x ?? OFFICIAL_MAP_FRAME.minX;
 }
 
 function geoY(lat) {
-  const normalized = clamp(normalizedGeoPoint(lat, EDC_CENTER.lon).y, 0, 1);
-  return OFFICIAL_MAP_FRAME.minY + normalized * (OFFICIAL_MAP_FRAME.maxY - OFFICIAL_MAP_FRAME.minY);
+  return mapPositionForCoordinate(lat, EDC_CENTER.lon)?.y ?? OFFICIAL_MAP_FRAME.minY;
 }
 
 function normalizedGeoPoint(lat, lon) {
   return {
     x: (lon - EDC_GEO_BOUNDS.west) / (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west),
     y: (EDC_GEO_BOUNDS.north - lat) / (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south)
+  };
+}
+
+function mapPositionForCoordinate(lat, lon) {
+  const grid = geoGridCoordinates(lat, lon);
+  if (!grid) return null;
+
+  return clampMapPosition({
+    x: MAP_GRID.minX + clamp(grid.u, 0, 1) * (MAP_GRID.maxX - MAP_GRID.minX),
+    y: MAP_GRID.minY + clamp(grid.v, 0, 1) * (MAP_GRID.maxY - MAP_GRID.minY)
+  });
+}
+
+function geoGridCoordinates(lat, lon) {
+  if (![lat, lon].every(Number.isFinite)) return null;
+
+  const point = projectGeoPoint({ lat, lon });
+  const topLeft = geoCorner("topLeft");
+  const topRight = geoCorner("topRight");
+  const bottomRight = geoCorner("bottomRight");
+  const bottomLeft = geoCorner("bottomLeft");
+  let { u, v } = initialGridGuess(point, topLeft, topRight, bottomLeft);
+
+  for (let index = 0; index < 8; index += 1) {
+    const current = bilinearPoint(topLeft, topRight, bottomRight, bottomLeft, u, v);
+    const du = {
+      x: (1 - v) * (topRight.x - topLeft.x) + v * (bottomRight.x - bottomLeft.x),
+      y: (1 - v) * (topRight.y - topLeft.y) + v * (bottomRight.y - bottomLeft.y)
+    };
+    const dv = {
+      x: (1 - u) * (bottomLeft.x - topLeft.x) + u * (bottomRight.x - topRight.x),
+      y: (1 - u) * (bottomLeft.y - topLeft.y) + u * (bottomRight.y - topRight.y)
+    };
+    const delta = { x: point.x - current.x, y: point.y - current.y };
+    const det = du.x * dv.y - du.y * dv.x;
+    if (Math.abs(det) < 1e-12) break;
+    u += (delta.x * dv.y - delta.y * dv.x) / det;
+    v += (du.x * delta.y - du.y * delta.x) / det;
+  }
+
+  return Number.isFinite(u) && Number.isFinite(v) ? { u, v } : null;
+}
+
+function initialGridGuess(point, topLeft, topRight, bottomLeft) {
+  const a = { x: topRight.x - topLeft.x, y: topRight.y - topLeft.y };
+  const b = { x: bottomLeft.x - topLeft.x, y: bottomLeft.y - topLeft.y };
+  const p = { x: point.x - topLeft.x, y: point.y - topLeft.y };
+  const det = a.x * b.y - a.y * b.x;
+  if (Math.abs(det) < 1e-12) return { u: 0.5, v: 0.5 };
+  return {
+    u: (p.x * b.y - p.y * b.x) / det,
+    v: (a.x * p.y - a.y * p.x) / det
+  };
+}
+
+function pointInGeoPolygon(point, polygon) {
+  let inside = false;
+  for (let index = 0, prev = polygon.length - 1; index < polygon.length; prev = index, index += 1) {
+    const current = polygon[index];
+    const previous = polygon[prev];
+    const crosses = ((current.lat > point.lat) !== (previous.lat > point.lat))
+      && point.lon < (previous.lon - current.lon) * (point.lat - current.lat) / (previous.lat - current.lat) + current.lon;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function distanceToGeoPolygon(point, polygon) {
+  const projected = projectGeoPoint(point);
+  let best = Infinity;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const start = projectGeoPoint(polygon[index]);
+    const end = projectGeoPoint(polygon[(index + 1) % polygon.length]);
+    best = Math.min(best, distanceToSegment(projected, start, end));
+  }
+  return best;
+}
+
+function distanceToSegment(point, start, end) {
+  const segment = { x: end.x - start.x, y: end.y - start.y };
+  const lengthSquared = segment.x ** 2 + segment.y ** 2;
+  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y);
+  const t = clamp(((point.x - start.x) * segment.x + (point.y - start.y) * segment.y) / lengthSquared, 0, 1);
+  return Math.hypot(point.x - (start.x + segment.x * t), point.y - (start.y + segment.y * t));
+}
+
+function geoCorner(name) {
+  return projectGeoPoint(EDC_GRID_GEO_CORNERS[name]);
+}
+
+function projectGeoPoint(point) {
+  return {
+    x: (point.lon - EDC_CENTER.lon) * GEO_X_SCALE,
+    y: point.lat - EDC_CENTER.lat
+  };
+}
+
+function unprojectGeoPoint(point) {
+  return {
+    lat: point.y + EDC_CENTER.lat,
+    lon: point.x / GEO_X_SCALE + EDC_CENTER.lon
+  };
+}
+
+function bilinearPoint(topLeft, topRight, bottomRight, bottomLeft, u, v) {
+  return {
+    x: (1 - u) * (1 - v) * topLeft.x + u * (1 - v) * topRight.x + u * v * bottomRight.x + (1 - u) * v * bottomLeft.x,
+    y: (1 - u) * (1 - v) * topLeft.y + u * (1 - v) * topRight.y + u * v * bottomRight.y + (1 - u) * v * bottomLeft.y
   };
 }
 
@@ -3061,7 +3353,7 @@ function avatarElement(friend, className) {
 function refreshAvatarElement(avatar, friend) {
   const displayFriend = friendWithDisplayName(friend);
   avatar.style.setProperty("--friend-color", displayFriend.color || "#53e2ff");
-  const nextPhoto = displayFriend.photo || "";
+  const nextPhoto = navigator.onLine ? displayFriend.photo || "" : "";
   const nextInitials = initials(displayFriend.name);
   if (avatar.dataset.photo === nextPhoto && avatar.dataset.initials === nextInitials) return;
 
