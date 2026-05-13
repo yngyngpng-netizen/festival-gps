@@ -8,22 +8,37 @@ const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
 const EDC_GEO_MARGIN = 0.0015;
 const MAP_PIN_BOUNDS = {
-  minX: 0.065,
-  maxX: 0.745,
-  minY: 0.12,
+  minX: 0.045,
+  maxX: 0.742,
+  minY: 0.095,
   maxY: 0.955
 };
 const OFFICIAL_MAP_FRAME = {
-  minX: 0.075,
-  maxX: 0.735,
-  minY: 0.13,
-  maxY: 0.945
+  minX: 0.045,
+  maxX: 0.708,
+  minY: 0.095,
+  maxY: 0.936
+};
+const MAP_GRID = {
+  columns: "ABCDEFGHIJKLMNOP".split(""),
+  rows: 24,
+  minX: 0.045,
+  maxX: 0.708,
+  minY: 0.095,
+  maxY: 0.936
 };
 const EDC_GEO_BOUNDS = {
-  north: 36.282,
-  south: 36.258,
-  west: -115.026,
-  east: -114.996
+  north: 36.279,
+  south: 36.2585,
+  west: -115.024,
+  east: -115.002
+};
+const EDC_INFIELD_OVAL = {
+  centerX: 0.5,
+  centerY: 0.52,
+  radiusX: 0.58,
+  radiusY: 0.6,
+  tolerance: 1.18
 };
 const EDC_CENTER = {
   lat: (EDC_GEO_BOUNDS.north + EDC_GEO_BOUNDS.south) / 2,
@@ -44,18 +59,18 @@ const festivalWindows = {
 };
 
 const stages = [
-  { id: "kinetic-field", name: "Kinetic Field", short: "KF", x: 0.43, y: 0.17, color: "#ff4fd8", art: "linear-gradient(135deg, #15132a, #ff4fd8 58%, #ffe86a)" },
-  { id: "cosmic-meadow", name: "Cosmic Meadow", short: "CM", x: 0.16, y: 0.50, color: "#53e2ff", art: "linear-gradient(135deg, #10263a, #53e2ff 54%, #f8f4a6)" },
-  { id: "circuit-grounds", name: "Circuit Grounds", short: "CG", x: 0.55, y: 0.85, color: "#a5ff5f", art: "linear-gradient(135deg, #152918, #a5ff5f 56%, #53e2ff)" },
-  { id: "neon-garden", name: "Neon Garden", short: "NG", x: 0.57, y: 0.52, color: "#ffe45f", art: "linear-gradient(135deg, #30250a, #ffe45f 54%, #ff4fd8)" },
-  { id: "basspod", name: "Basspod", short: "BP", x: 0.43, y: 0.84, color: "#ff6b6b", art: "linear-gradient(135deg, #321414, #ff6b6b 56%, #8e7cff)" },
-  { id: "wasteland", name: "Wasteland", short: "WL", x: 0.17, y: 0.82, color: "#ff9f43", art: "linear-gradient(135deg, #321c0b, #ff9f43 55%, #f8f4a6)" },
-  { id: "quantum-valley", name: "Quantum Valley", short: "QV", x: 0.55, y: 0.31, color: "#8e7cff", art: "linear-gradient(135deg, #161238, #8e7cff 55%, #53e2ff)" },
-  { id: "stereo-bloom", name: "Stereo Bloom", short: "SB", x: 0.30, y: 0.36, color: "#4dffb8", art: "linear-gradient(135deg, #102d27, #4dffb8 55%, #ffe45f)" },
-  { id: "bionic-jungle", name: "Bionic Jungle", short: "BJ", x: 0.16, y: 0.31, color: "#f86fff", art: "linear-gradient(135deg, #2c1232, #f86fff 56%, #a5ff5f)" },
-  { id: "art-cars", name: "Art Cars", short: "AC", x: 0.32, y: 0.43, color: "#f8f4a6", art: "linear-gradient(135deg, #2d2a10, #f8f4a6 58%, #ff9f43)" },
-  { id: "downtown-edc", name: "Downtown EDC", short: "DT", x: 0.36, y: 0.59, color: "#7de2d1", art: "linear-gradient(135deg, #102b2c, #7de2d1 58%, #ff4fd8)" },
-  { id: "speedway-entry", name: "Speedway Entry", short: "IN", x: 0.07, y: 0.57, color: "#007aff", art: "linear-gradient(135deg, #f5f7fb, #d9e5ff)" }
+  { id: "kinetic-field", name: "Kinetic Field", short: "KF", x: 0.43, y: 0.19, color: "#ff4fd8", art: "linear-gradient(135deg, #15132a, #ff4fd8 58%, #ffe86a)" },
+  { id: "cosmic-meadow", name: "Cosmic Meadow", short: "CM", x: 0.16, y: 0.54, color: "#53e2ff", art: "linear-gradient(135deg, #10263a, #53e2ff 54%, #f8f4a6)" },
+  { id: "circuit-grounds", name: "Circuit Grounds", short: "CG", x: 0.54, y: 0.91, color: "#a5ff5f", art: "linear-gradient(135deg, #152918, #a5ff5f 56%, #53e2ff)" },
+  { id: "neon-garden", name: "Neon Garden", short: "NG", x: 0.58, y: 0.54, color: "#ffe45f", art: "linear-gradient(135deg, #30250a, #ffe45f 54%, #ff4fd8)" },
+  { id: "basspod", name: "Basspod", short: "BP", x: 0.42, y: 0.90, color: "#ff6b6b", art: "linear-gradient(135deg, #321414, #ff6b6b 56%, #8e7cff)" },
+  { id: "wasteland", name: "Wasteland", short: "WL", x: 0.16, y: 0.87, color: "#ff9f43", art: "linear-gradient(135deg, #321c0b, #ff9f43 55%, #f8f4a6)" },
+  { id: "quantum-valley", name: "Quantum Valley", short: "QV", x: 0.57, y: 0.34, color: "#8e7cff", art: "linear-gradient(135deg, #161238, #8e7cff 55%, #53e2ff)" },
+  { id: "stereo-bloom", name: "Stereo Bloom", short: "SB", x: 0.28, y: 0.39, color: "#4dffb8", art: "linear-gradient(135deg, #102d27, #4dffb8 55%, #ffe45f)" },
+  { id: "bionic-jungle", name: "Bionic Jungle", short: "BJ", x: 0.16, y: 0.34, color: "#f86fff", art: "linear-gradient(135deg, #2c1232, #f86fff 56%, #a5ff5f)" },
+  { id: "art-cars", name: "Art Cars", short: "AC", x: 0.35, y: 0.51, color: "#f8f4a6", art: "linear-gradient(135deg, #2d2a10, #f8f4a6 58%, #ff9f43)" },
+  { id: "downtown-edc", name: "Downtown EDC", short: "DT", x: 0.38, y: 0.61, color: "#7de2d1", art: "linear-gradient(135deg, #102b2c, #7de2d1 58%, #ff4fd8)" },
+  { id: "speedway-entry", name: "Speedway Entry", short: "IN", x: 0.055, y: 0.63, color: "#007aff", art: "linear-gradient(135deg, #f5f7fb, #d9e5ff)" }
 ];
 
 const aliases = new Map([
@@ -102,6 +117,40 @@ const KNOWN_EDC_SCHEDULE_ROWS = [
   { artist: "Fisher", day: "Friday", start: "1:47 AM", end: "2:57 AM", stage: "Kinetic Field" },
   { artist: "Charlotte de Witte", day: "Friday", start: "4:14 AM", end: "5:28 AM", stage: "Kinetic Field" }
 ];
+
+const OFFICIAL_SET_TIME_ROWS = [
+  { day: "friday", stage: "Kinetic Field", sets: "Laidback Luke B2B Chuckie 07:00 PM - 08:00 PM Korolova 08:00 PM - 09:00 PM Argy 09:00 PM - 10:00 PM Chris Lorenzo 10:07 PM - 11:15 PM Sofi Tukker 11:19 PM - 12:28 AM The Chainsmokers 12:32 AM - 01:40 AM Fisher 01:47 AM - 02:57 AM Porter Robinson (DJ Set) 03:01 AM - 04:10 AM Charlotte de Witte 04:14 AM - 05:28 AM" },
+  { day: "friday", stage: "Cosmic Meadow", sets: "Max Dean B2B Luke Dean 05:00 PM - 06:55 PM Jackie Hollander 07:00 PM - 07:55 PM Roddy Lima 07:55 PM - 08:55 PM Westend 08:55 PM - 09:55 PM Walker & Royce B2B VNSSA 09:55 PM - 10:55 PM Underworld 11:10 PM - 12:10 AM MEDUZA³ 12:25 AM - 01:40 AM Notion 01:47 AM - 02:47 AM MPH 02:47 AM - 04:02 AM San Pacho 04:02 AM - 05:30 AM" },
+  { day: "friday", stage: "Circuit Grounds", sets: "1991 07:00 PM - 08:00 PM Bou 08:00 PM - 09:00 PM Nico Moreno 09:00 PM - 10:00 PM I Hate Models 10:00 PM - 11:15 PM Levity 11:15 PM - 12:25 AM Wooli 12:25 AM - 01:35 AM The Outlaw 01:35 AM - 02:35 AM Holy Priest 02:35 AM - 03:30 AM Ray Volpe 03:30 AM - 04:30 AM Level Up 04:30 AM - 05:30 AM" },
+  { day: "friday", stage: "Neon Garden", sets: "Anastazja 07:00 PM - 08:30 PM MËSTIZA 08:30 PM - 10:00 PM DJ Tennis B2B Chloé Caillet 10:00 PM - 11:30 PM Peggy Gou 11:30 PM - 01:00 AM Adriatique 01:00 AM - 02:30 AM Joseph Capriati 02:30 AM - 04:00 AM Eli Brown 04:00 AM - 05:30 AM" },
+  { day: "friday", stage: "Basspod", sets: "RIOT 07:00 PM - 07:50 PM The Masquerade 07:50 PM - 08:40 PM HEYZ 08:40 PM - 09:30 PM MUZZ 09:30 PM - 10:30 PM GorillaT 10:30 PM - 11:30 PM Ghengar 11:30 PM - 12:30 AM ATLiens 12:30 AM - 01:30 AM Kai Wachi 01:30 AM - 02:30 AM Adventure Club (Throwback Set) 02:30 AM - 03:30 AM Culture Shock 03:30 AM - 04:30 AM Cyclops 04:30 AM - 05:30 AM" },
+  { day: "friday", stage: "Wasteland", sets: "DØMINA 07:00 PM - 08:30 PM Serafina 08:30 PM - 09:30 PM Johannes Schuster 09:30 PM - 10:30 PM Adrián Mills 10:30 PM - 11:30 PM Cloudy 11:30 PM - 12:30 AM KUKO 12:30 AM - 01:30 AM GRAVEDGR 01:30 AM - 02:30 AM Rebekah 02:30 AM - 03:30 AM DYEN 03:30 AM - 04:30 AM Stan Christ 04:30 AM - 05:30 AM" },
+  { day: "friday", stage: "Quantum Valley", sets: "Sarah de Warren 07:00 PM - 08:00 PM Matty Ralph 08:00 PM - 09:00 PM Cold Blue 09:00 PM - 10:00 PM Pegassi 10:00 PM - 11:00 PM Darude 11:00 PM - 12:00 AM Cosmic Gate 12:00 AM - 01:00 AM Gareth Emery 01:00 AM - 02:00 AM Ilan Bluestone 02:00 AM - 03:00 AM Paul van Dyk 03:00 AM - 04:00 AM Darren Porter 04:00 AM - 05:30 AM" },
+  { day: "friday", stage: "Stereo Bloom", sets: "Abana B2B Juliet Mendoza 07:00 PM - 08:00 PM SLAMM 08:00 PM - 09:00 PM Luuk van Dijk 09:00 PM - 10:15 PM Omar+ 10:15 PM - 11:30 PM Luke Dean 11:30 PM - 12:45 AM Josh Baker 12:45 AM - 02:00 AM Max Dean 02:00 AM - 03:15 AM Obskür 03:15 AM - 04:30 AM Toman 04:30 AM - 05:30 AM" },
+  { day: "friday", stage: "Bionic Jungle", sets: "Heidi Lawden B2B Masha Mar 05:00 PM - 07:00 PM Stacy Christine 07:00 PM - 08:00 PM The Carry Nation 08:00 PM - 09:30 PM Massimiliano Pagliara 09:30 PM - 11:00 PM PARAMIDA 11:00 PM - 12:30 AM salute B2B Chloé Caillet 12:30 AM - 02:30 AM Robert Hood 02:30 AM - 04:00 AM Avalon Emerson 04:00 AM - 05:30 AM" },
+
+  { day: "saturday", stage: "Kinetic Field", sets: "AR/CO 07:00 PM - 08:00 PM HAYLA 08:00 PM - 09:00 PM Sub Focus 09:00 PM - 10:00 PM Steve Aoki 10:07 PM - 11:15 PM Hardwell 11:19 PM - 12:28 AM John Summit 12:32 AM - 01:40 AM Subtronics 01:47 AM - 02:57 AM Kaskade 03:01 AM - 04:10 AM Above & Beyond (Sunrise Set) 04:14 AM - 05:28 AM" },
+  { day: "saturday", stage: "Cosmic Meadow", sets: "Frost Children 07:00 PM - 08:15 PM Hannah Laing 08:15 PM - 09:25 PM Snow Strippers 09:25 PM - 10:15 PM VTSS (In The Round) 10:15 PM - 11:30 PM The Prodigy 11:35 PM - 12:35 AM BUNT. (In The Round) 12:40 AM - 02:10 AM Interplanetary Criminal 02:10 AM - 03:30 AM MALUGI 03:30 AM - 04:30 AM DJ Gigola B2B MCR-T 04:30 AM - 05:30 AM" },
+  { day: "saturday", stage: "Circuit Grounds", sets: "DJ Mandy 07:00 PM - 08:00 PM RØZ 08:00 PM - 09:15 PM KETTAMA 09:15 PM - 10:45 PM Sammy Virji 10:45 PM - 12:15 AM Tiësto 12:15 AM - 01:45 AM Peggy Gou B2B KI/KI 01:45 AM - 03:15 AM Boys Noize 03:15 AM - 04:30 AM Lilly Palmer 04:30 AM - 05:30 AM" },
+  { day: "saturday", stage: "Neon Garden", sets: "mink 07:00 PM - 08:30 PM Silvie Loto 08:30 PM - 10:00 PM Ahmed Spins 10:00 PM - 11:30 PM Luciano 11:30 PM - 01:30 AM Prospa 01:30 AM - 03:30 AM Josh Baker B2B KETTAMA B2B Prospa 03:30 AM - 05:30 AM" },
+  { day: "saturday", stage: "Basspod", sets: "Fallen with MC Dino 07:00 PM - 07:50 PM AVELLO B2B Dennett 07:50 PM - 08:40 PM Viperactive 08:40 PM - 09:30 PM Hybrid Minds 09:30 PM - 10:30 PM YDG 10:30 PM - 11:30 PM Delta Heavy 11:30 PM - 12:30 AM Getter 12:30 AM - 01:30 AM Eptic B2B Space Laces 01:30 AM - 02:30 AM Doctor P B2B Flux Pavilion B2B FuntCase 02:30 AM - 03:30 AM HOL! 03:30 AM - 04:30 AM Mary Droppinz 04:30 AM - 05:30 AM" },
+  { day: "saturday", stage: "Wasteland", sets: "CUTDWN 07:00 PM - 08:30 PM Dead X 08:30 PM - 09:30 PM The Saints 09:30 PM - 10:30 PM Rob Gee B2B Lenny Dee 10:30 PM - 11:30 PM Lady Faith B2B LNY TNZ 11:30 PM - 12:30 AM Audiofreq B2B Code Black B2B Toneshifterz 12:30 AM - 01:30 AM Da Tweekaz 01:30 AM - 02:30 AM Lil Texas 02:30 AM - 03:30 AM Mish 03:30 AM - 04:30 AM Alyssa Jolee 04:30 AM - 05:30 AM" },
+  { day: "saturday", stage: "Quantum Valley", sets: "Maria Healy 07:00 PM - 08:30 PM SUPERSTRINGS 08:30 PM - 09:30 PM Billy Gillies 09:30 PM - 10:30 PM Paul Oakenfold 10:30 PM - 11:30 PM Andrew Rayel 11:30 PM - 12:30 AM Maddix 12:30 AM - 01:30 AM Mathame 01:30 AM - 02:30 AM Astrix 02:30 AM - 03:30 AM T78 03:30 AM - 04:30 AM Thomas Schumacher 04:30 AM - 05:30 AM" },
+  { day: "saturday", stage: "Stereo Bloom", sets: "Slugg 07:00 PM - 08:00 PM DREYA V 08:00 PM - 09:00 PM Discip 09:00 PM - 10:00 PM OMNOM 10:00 PM - 11:15 PM Noizu 11:15 PM - 12:30 AM Wax Motif 12:30 AM - 01:45 AM CID 01:45 AM - 03:00 AM HNTR 03:00 AM - 04:15 AM BOLO (Sunrise Set) 04:15 AM - 05:30 AM" },
+  { day: "saturday", stage: "Bionic Jungle", sets: "Player Dave 07:00 PM - 08:00 PM Spray 08:00 PM - 09:00 PM Bashkka B2B Sedef Adasï 09:00 PM - 10:30 PM HAAi B2B Luke Alessi 10:30 PM - 12:00 AM MCR-T 12:00 AM - 01:15 AM Bad Boombox B2B Ollie Lishman 01:15 AM - 02:30 AM Benwal 02:30 AM - 03:30 AM BAUGRUPPE90 03:30 AM - 04:30 AM Club Angel 04:30 AM - 05:30 AM" },
+
+  { day: "sunday", stage: "Kinetic Field", sets: "Trace 07:00 PM - 08:00 PM Ship Wrek 08:00 PM - 09:00 PM Layton Giordani 09:00 PM - 10:00 PM Funk Tribu 10:07 PM - 11:15 PM GRiZ B2B Wooli 11:19 PM - 12:28 AM Zedd 12:32 AM - 01:40 AM Martin Garrix 01:47 AM - 02:57 AM Cloonee 03:01 AM - 04:10 AM Armin van Buuren (Sunrise Set) 04:14 AM - 05:28 AM" },
+  { day: "sunday", stage: "Cosmic Meadow", sets: "GRAVAGERZ 07:00 PM - 08:00 PM Nostalgix 08:00 PM - 09:00 PM William Black 09:00 PM - 10:00 PM San Holo (Wholesome Riddim Set) 10:00 PM - 11:00 PM Dabin 11:00 PM - 12:05 AM Alison Wonderland 12:05 AM - 01:05 AM Seven Lions 01:05 AM - 02:20 AM Restricted 02:20 AM - 03:20 AM Black Tiger Sex Machine 03:20 AM - 04:30 AM Nico Moreno B2B Holy Priest 04:30 AM - 05:30 AM" },
+  { day: "sunday", stage: "Circuit Grounds", sets: "Linska 07:00 PM - 08:30 PM ANNA 08:30 PM - 10:00 PM Beltran 10:00 PM - 11:30 PM Chris Stussy 11:30 PM - 01:00 AM Solomun 01:00 AM - 02:30 AM Vintage Culture 02:30 AM - 04:00 AM Kevin de Vries 04:00 AM - 05:30 AM" },
+  { day: "sunday", stage: "Neon Garden", sets: "Bad Beat 07:00 PM - 08:15 PM Frankie Bones 08:15 PM - 09:30 PM Adiel 09:30 PM - 10:50 PM DJ Gigola 10:50 PM - 12:10 AM 999999999 12:10 AM - 01:30 AM Indira Paganotto 01:30 AM - 02:50 AM KI/KI 02:50 AM - 04:10 AM Klangkuenstler 04:10 AM - 05:30 AM" },
+  { day: "sunday", stage: "Basspod", sets: "Nightstalker with MC Dino 07:00 PM - 07:50 PM Sippy 07:50 PM - 08:40 PM EAZYBAKED 08:40 PM - 09:30 PM INFEKT B2B Samplifire 09:30 PM - 10:30 PM A.M.C with MC Phantom 10:30 PM - 11:30 PM Virtual Riot 11:30 PM - 12:30 AM Peekaboo 12:30 AM - 01:30 AM AHEE B2B Liquid Stranger 01:30 AM - 02:30 AM Whethan 02:30 AM - 03:30 AM Boogie T B2B Distinct Motive 03:30 AM - 04:30 AM ÆON:MODE (Sunrise Set) 04:30 AM - 05:30 AM" },
+  { day: "sunday", stage: "Wasteland", sets: "Sihk 07:00 PM - 08:30 PM Clawz 08:30 PM - 09:30 PM The Purge 09:30 PM - 10:30 PM Yosuf 10:30 PM - 11:30 PM DJ Isaac 11:30 PM - 12:30 AM Vieze Asbak 12:30 AM - 01:30 AM Sub Zero Project 01:30 AM - 02:30 AM Rooler 02:30 AM - 03:30 AM Warface 03:30 AM - 04:30 AM MADGRRL B2B VESSEL 04:30 AM - 05:30 AM" },
+  { day: "sunday", stage: "Quantum Valley", sets: "Warung 07:00 PM - 08:00 PM Shingo Nakamura 08:00 PM - 09:00 PM Rebūke 09:00 PM - 10:00 PM Cristoph 10:00 PM - 11:00 PM Eli & Fur 11:00 PM - 12:00 AM Tinlicker (DJ Set) 12:00 AM - 01:00 AM Cassian 01:00 AM - 02:15 AM Massano 02:15 AM - 03:30 AM Innellea 03:30 AM - 04:30 AM KREAM 04:30 AM - 05:30 AM" },
+  { day: "sunday", stage: "Stereo Bloom", sets: "Klo 07:00 PM - 08:00 PM Murphy's Law 08:00 PM - 09:15 PM Sidney Charles B2B Bushbaby 09:15 PM - 10:30 PM Skream 10:30 PM - 11:45 PM Hamdi 11:45 PM - 01:00 AM Chris Lorenzo B2B Bullet Tooth 01:00 AM - 02:15 AM Silva Bumpa 02:15 AM - 03:30 AM Morgan Seatree 03:30 AM - 04:30 AM Lu.Re 04:30 AM - 05:30 AM" },
+  { day: "sunday", stage: "Bionic Jungle", sets: "Alves 07:00 PM - 08:30 PM ISAbella 08:30 PM - 10:30 PM KinAhau 10:30 PM - 12:00 AM Tiga 12:00 AM - 01:30 AM DJ Tennis B2B Red Axes 01:30 AM - 03:30 AM Beltran B2B Simas 03:30 AM - 05:30 AM" }
+];
+
+let officialSetTimeCache = null;
 
 let state = {
   selectedDay: "friday",
@@ -828,13 +877,6 @@ async function handleLivePosition(position) {
   const lon = position.coords.longitude;
   const accuracy = position.coords.accuracy;
 
-  if (!coordinateWithinEdc(lat, lon, accuracy)) {
-    lastLocationProblem = "GPS outside EDC map, using schedule";
-    await clearOwnLiveLocation();
-    renderAll();
-    return;
-  }
-
   const liveLocation = normalizeLiveLocation({
     lat,
     lon,
@@ -846,7 +888,13 @@ async function handleLivePosition(position) {
     source: "gps"
   });
 
-  lastLocationProblem = "";
+  if (!liveLocation) {
+    lastLocationProblem = "GPS unavailable, using schedule";
+    renderAll();
+    return;
+  }
+
+  lastLocationProblem = liveLocation.outsideVenue ? "GPS outside EDC infield, showing the gate" : "";
   user.liveLocation = liveLocation;
   state.user = user;
   const friend = state.friends.find((item) => item.id === user.id);
@@ -1216,7 +1264,14 @@ function renderStages() {
 
     const photo = document.createElement("span");
     photo.className = "stage-photo";
-    photo.textContent = stage.short || "";
+    if (now?.artist) {
+      photo.classList.add("artist-active");
+      photo.textContent = initials(now.artist);
+      photo.title = now.artist;
+      photo.style.setProperty("--stage-art", artistGradient(now.artist, stage.color));
+    } else {
+      photo.textContent = stage.short || "";
+    }
     const name = document.createElement("span");
     name.className = "stage-name";
     name.textContent = stage.name;
@@ -1234,14 +1289,17 @@ function renderStages() {
 }
 
 function stageNowSummary(stage) {
-  if (!state.user || !state.friends.length) return null;
+  const official = officialEventForStage(stage.id);
+  if (!state.user || !state.friends.length) {
+    return official ? officialStageSummary(official) : null;
+  }
 
   const matches = state.friends.flatMap((friend) => (
     friend.schedule
       .filter((item) => item.day === state.selectedDay && item.stageId === stage.id && item.start <= state.selectedMinute && state.selectedMinute <= item.end)
       .map((item) => ({ friend, item }))
   ));
-  if (!matches.length) return null;
+  if (!matches.length) return official ? officialStageSummary(official) : null;
 
   const artistCounts = new Map();
   const friendNames = new Set();
@@ -1260,8 +1318,60 @@ function stageNowSummary(stage) {
 
   return {
     label: `${visibleArtists}${moreArtists} · ${friendsText}`,
-    title: `${artists.join(", ")} - ${[...friendNames].join(", ")}`
+    title: `${artists.join(", ")} - ${[...friendNames].join(", ")}`,
+    artist: artists[0]
   };
+}
+
+function officialStageSummary(event) {
+  return {
+    label: event.artist,
+    title: `${event.artist} - ${formatTime(event.start)} to ${formatTime(event.end)}`,
+    artist: event.artist
+  };
+}
+
+function officialEventForStage(stageId) {
+  return officialSetTimes()
+    .filter((event) => (
+      event.day === state.selectedDay &&
+      event.stageId === stageId &&
+      event.start <= state.selectedMinute &&
+      state.selectedMinute <= event.end
+    ))
+    .sort((a, b) => b.start - a.start || a.end - b.end)[0] || null;
+}
+
+function officialSetTimes() {
+  if (officialSetTimeCache) return officialSetTimeCache;
+
+  officialSetTimeCache = OFFICIAL_SET_TIME_ROWS.flatMap((row) => {
+    const stageId = stageIdIn(row.stage);
+    if (!stageId) return [];
+    return parseOfficialSetString(row.sets).map((event) => ({
+      id: `official-${row.day}-${stageId}-${simpleHash(`${event.artist}-${event.start}-${event.end}`)}`,
+      artist: cleanArtist(event.artist),
+      day: row.day,
+      stageId,
+      start: event.start,
+      end: event.end
+    }));
+  });
+
+  return officialSetTimeCache;
+}
+
+function parseOfficialSetString(sets) {
+  const pattern = /(.+?)\s+(\d{1,2}:\d{2}\s*(?:AM|PM))\s*-\s*(\d{1,2}:\d{2}\s*(?:AM|PM))/gi;
+  return [...String(sets || "").matchAll(pattern)].map((match) => {
+    const range = parseTimeRange(`${match[2]} - ${match[3]}`);
+    if (!range) return null;
+    return {
+      artist: match[1].trim(),
+      start: range.start,
+      end: range.end
+    };
+  }).filter(Boolean);
 }
 
 function renderRoutes() {
@@ -1301,16 +1411,21 @@ function renderPins() {
     }
 
     pin.classList.toggle("selected", friend.id === selectedFriendId);
+    const friendGrid = gridForFriend(friend, position);
     pin.classList.toggle("live", currentLocationMode && Boolean(liveLocationForFriend(friend)));
     pin.style.setProperty("--friend-color", friend.color || "#53e2ff");
-    pin.setAttribute("aria-label", `${friend.name}, ${statusText(friend)}`);
+    pin.setAttribute("aria-label", `${friend.name}, ${statusText(friend)}, grid ${friendGrid}`);
+    pin.dataset.grid = friendGrid;
     pin.replaceChildren();
 
     const name = document.createElement("span");
     name.className = "pin-name";
     name.textContent = friend.name || "Friend";
+    const gridBadge = document.createElement("span");
+    gridBadge.className = "pin-grid";
+    gridBadge.textContent = friendGrid;
 
-    pin.append(name, avatarElement(friend, "pin-head"));
+    pin.append(name, avatarElement(friend, "pin-head"), gridBadge);
 
     if (isNew) {
       pin.style.left = `${position.x * 100}%`;
@@ -1402,7 +1517,7 @@ function renderFriendDetail(friend = selectedFriend()) {
   els.friendDetailName.textContent = current.name || "Friend";
   renderAvatarInto(els.friendDetailAvatar, current);
   els.friendDetailNow.textContent = statusText(current);
-  els.friendDetailSource.textContent = locationSourceText(current);
+  els.friendDetailSource.textContent = `${locationSourceText(current)} · Grid ${gridForFriend(current)}`;
   els.friendDetailSchedule.replaceChildren();
 
   const dayOrder = new Map(Object.keys(days).map((day, index) => [day, index]));
@@ -1452,7 +1567,7 @@ function renderFriendDetail(friend = selectedFriend()) {
 function renderSelectedFriendSummary() {
   const selected = selectedFriend();
   els.selectedFriendName.textContent = selected.name || "Your crew";
-  els.selectedFriendStage.textContent = nextStopText(selected);
+  els.selectedFriendStage.textContent = `${nextStopText(selected)} · Grid ${gridForFriend(selected)}`;
 }
 
 function nextStopText(friend) {
@@ -2184,10 +2299,16 @@ function displayEvent(friend) {
 function statusText(friend) {
   if (currentLocationMode) {
     const live = liveLocationForFriend(friend);
-    if (live) return `Live GPS: ${stageById(live.stageId).name}`;
+    if (live) {
+      const prefix = live.outsideVenue ? "Outside venue" : "Live GPS";
+      return `${prefix}: ${stageById(live.stageId).name}`;
+    }
 
     const lastKnown = lastKnownLocationForFriend(friend);
-    if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) return `Last seen: ${stageById(lastKnown.stageId).name}`;
+    if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) {
+      const prefix = lastKnown.outsideVenue ? "Outside venue" : "Last seen";
+      return `${prefix}: ${stageById(lastKnown.stageId).name}`;
+    }
   }
 
   const active = activeEvent(friend);
@@ -2208,8 +2329,14 @@ function locationSourceText(friend) {
   if (currentLocationMode) {
     const live = liveLocationForFriend(friend);
     const lastKnown = lastKnownLocationForFriend(friend);
-    if (live) return `${selectedIsSelf ? "Your" : "Friend"} live GPS ${relativeAge(live.updatedAt)}`;
-    if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) return `${navigator.onLine ? "Last GPS" : "Offline last seen"} ${relativeAge(lastKnown.updatedAt)}`;
+    if (live) {
+      const source = live.outsideVenue ? "outside EDC, pinned to gate" : "live GPS";
+      return `${selectedIsSelf ? "Your" : "Friend"} ${source} ${relativeAge(live.updatedAt)}`;
+    }
+    if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) {
+      const source = lastKnown.outsideVenue ? "Last outside EDC, pinned to gate" : (navigator.onLine ? "Last GPS" : "Offline last seen");
+      return `${source} ${relativeAge(lastKnown.updatedAt)}`;
+    }
     if (lastKnown) return "Schedule after last GPS";
   }
 
@@ -2249,6 +2376,23 @@ function positionForFriend(friend, stage, groups) {
   }
 
   return clampMapPosition(offsetPosition(friend, stage, groups));
+}
+
+function gridForFriend(friend, knownPosition = null) {
+  const position = knownPosition || positionForFriend(friend, stageForFriend(friend), stagePlacements());
+  return gridForPosition(position);
+}
+
+function gridForPosition(position) {
+  const rawX = Number(position?.x);
+  const rawY = Number(position?.y);
+  const x = clamp(Number.isFinite(rawX) ? rawX : stageById("speedway-entry").x, MAP_GRID.minX, MAP_GRID.maxX);
+  const y = clamp(Number.isFinite(rawY) ? rawY : stageById("speedway-entry").y, MAP_GRID.minY, MAP_GRID.maxY);
+  const columnSize = (MAP_GRID.maxX - MAP_GRID.minX) / MAP_GRID.columns.length;
+  const rowSize = (MAP_GRID.maxY - MAP_GRID.minY) / MAP_GRID.rows;
+  const columnIndex = clamp(Math.floor((x - MAP_GRID.minX) / columnSize), 0, MAP_GRID.columns.length - 1);
+  const rowIndex = clamp(Math.floor((y - MAP_GRID.minY) / rowSize), 0, MAP_GRID.rows - 1);
+  return `${MAP_GRID.columns[columnIndex]}${rowIndex + 1}`;
 }
 
 function screenPositionForStage(stage) {
@@ -2295,7 +2439,7 @@ function clampMapPosition(position) {
 function liveLocationForFriend(friend) {
   const live = normalizeLiveLocation(friend?.liveLocation);
   if (!live) return null;
-  if (!live.insideFestival) return null;
+  if (!locationCanPin(live)) return null;
   if (!navigator.onLine) return null;
   const updatedAt = Date.parse(live.updatedAt);
   if (!Number.isFinite(updatedAt)) return null;
@@ -2314,8 +2458,12 @@ function locationOverrideForFriend(friend) {
 
 function lastKnownLocationForFriend(friend) {
   const live = normalizeLiveLocation(friend?.liveLocation);
-  if (!live?.insideFestival) return null;
+  if (!locationCanPin(live)) return null;
   return live;
+}
+
+function locationCanPin(live) {
+  return Boolean(live && (live.insideFestival || live.outsideVenue));
 }
 
 function scheduleSupersedesLastLocation(friend, lastKnown) {
@@ -2352,11 +2500,18 @@ function normalizeLiveLocation(value) {
   if (!value || typeof value !== "object") return null;
   const lat = Number(value.lat);
   const lon = Number(value.lon);
-  const x = Number(value.x ?? geoX(lon));
-  const y = Number(value.y ?? geoY(lat));
   const updatedAt = value.updatedAt || value.timestamp || "";
 
-  if (![lat, lon, x, y].every(Number.isFinite) || !updatedAt) return null;
+  if (![lat, lon].every(Number.isFinite) || !updatedAt) return null;
+
+  const insideFestival = coordinateWithinEdc(lat, lon, value.accuracy);
+  const outsideVenue = value.outsideVenue === true || value.source === "outside-gate" || !insideFestival;
+  const gate = stageById("speedway-entry");
+  const rawX = Number(value.x ?? geoX(lon));
+  const rawY = Number(value.y ?? geoY(lat));
+  const x = outsideVenue ? gate.x : rawX;
+  const y = outsideVenue ? gate.y : rawY;
+  if (![x, y].every(Number.isFinite)) return null;
 
   return {
     lat,
@@ -2366,9 +2521,10 @@ function normalizeLiveLocation(value) {
     accuracy: Number.isFinite(Number(value.accuracy)) ? Number(value.accuracy) : null,
     updatedAt,
     online: value.online !== false,
-    source: value.source || "gps",
-    stageId: nearestStageId(x, y),
-    insideFestival: coordinateWithinEdc(lat, lon, value.accuracy)
+    source: outsideVenue ? "outside-gate" : (value.source || "gps"),
+    stageId: outsideVenue ? "speedway-entry" : nearestStageId(x, y),
+    insideFestival,
+    outsideVenue
   };
 }
 
@@ -2376,10 +2532,18 @@ function coordinateWithinEdc(lat, lon, accuracy = 0) {
   if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) return false;
   const accuracyMargin = Number.isFinite(Number(accuracy)) ? Math.min(0.006, Math.max(0, Number(accuracy) / 111000)) : 0;
   const margin = Math.max(EDC_GEO_MARGIN, accuracyMargin);
-  return lat >= EDC_GEO_BOUNDS.south - margin
+  const inBounds = lat >= EDC_GEO_BOUNDS.south - margin
     && lat <= EDC_GEO_BOUNDS.north + margin
     && lon >= EDC_GEO_BOUNDS.west - margin
     && lon <= EDC_GEO_BOUNDS.east + margin;
+  if (!inBounds) return false;
+
+  const normalized = normalizedGeoPoint(lat, lon);
+  const ovalScore = (
+    ((normalized.x - EDC_INFIELD_OVAL.centerX) / EDC_INFIELD_OVAL.radiusX) ** 2 +
+    ((normalized.y - EDC_INFIELD_OVAL.centerY) / EDC_INFIELD_OVAL.radiusY) ** 2
+  );
+  return ovalScore <= EDC_INFIELD_OVAL.tolerance || accuracyMargin > 0.0025;
 }
 
 function nearestStageId(x, y) {
@@ -2393,13 +2557,20 @@ function nearestStageId(x, y) {
 }
 
 function geoX(lon) {
-  const normalized = clamp((lon - EDC_GEO_BOUNDS.west) / (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west), 0, 1);
+  const normalized = clamp(normalizedGeoPoint(EDC_CENTER.lat, lon).x, 0, 1);
   return OFFICIAL_MAP_FRAME.minX + normalized * (OFFICIAL_MAP_FRAME.maxX - OFFICIAL_MAP_FRAME.minX);
 }
 
 function geoY(lat) {
-  const normalized = clamp((EDC_GEO_BOUNDS.north - lat) / (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south), 0, 1);
+  const normalized = clamp(normalizedGeoPoint(lat, EDC_CENTER.lon).y, 0, 1);
   return OFFICIAL_MAP_FRAME.minY + normalized * (OFFICIAL_MAP_FRAME.maxY - OFFICIAL_MAP_FRAME.minY);
+}
+
+function normalizedGeoPoint(lat, lon) {
+  return {
+    x: (lon - EDC_GEO_BOUNDS.west) / (EDC_GEO_BOUNDS.east - EDC_GEO_BOUNDS.west),
+    y: (EDC_GEO_BOUNDS.north - lat) / (EDC_GEO_BOUNDS.north - EDC_GEO_BOUNDS.south)
+  };
 }
 
 function relativeAge(updatedAt) {
@@ -3087,6 +3258,14 @@ function clamp(value, min, max) {
 function randomColor() {
   const palette = ["#53e2ff", "#ff4fd8", "#a5ff5f", "#ffe45f", "#ff6b6b", "#8e7cff", "#4dffb8"];
   return palette[Math.floor(Math.random() * palette.length)];
+}
+
+function artistGradient(name, fallbackColor = "#007aff") {
+  const palette = ["#007aff", "#34c759", "#ffcc00", "#ff5bd7", "#5856d6", "#00c7be", "#ff3b30"];
+  const hash = parseInt(simpleHash(name || fallbackColor), 36) || 0;
+  const first = palette[hash % palette.length];
+  const second = palette[(hash >> 3) % palette.length] || fallbackColor;
+  return `linear-gradient(135deg, #ffffff 0%, ${first} 42%, ${second} 100%)`;
 }
 
 function cryptoId() {
