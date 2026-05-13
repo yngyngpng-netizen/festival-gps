@@ -1124,23 +1124,54 @@ textarea {
   align-items: center;
 }
 
-.current-location-button {
+.current-location-switch {
   min-height: 34px;
-  border: 1px solid rgba(0, 122, 255, 0.22);
+  border: 0;
   border-radius: var(--radius);
-  padding: 0 12px;
-  background: rgba(0, 122, 255, 0.10);
-  color: var(--cyan);
+  padding: 0 4px 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(118, 118, 128, 0.12);
+  color: rgba(17, 17, 20, 0.76);
   font-size: 12px;
   font-weight: 950;
   white-space: nowrap;
 }
 
-.current-location-button.active {
-  background: var(--cyan);
-  color: white;
-  border-color: transparent;
-  box-shadow: 0 6px 16px rgba(0, 122, 255, 0.22);
+.current-location-switch.active {
+  color: var(--ink);
+}
+
+.switch-track {
+  position: relative;
+  width: 46px;
+  height: 28px;
+  flex: 0 0 46px;
+  border-radius: 999px;
+  background: #d1d1d6;
+  box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.12);
+  transition: background 180ms ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgba(31, 35, 45, 0.26);
+  transition: transform 180ms ease;
+}
+
+.current-location-switch.active .switch-track {
+  background: #34c759;
+}
+
+.current-location-switch.active .switch-thumb {
+  transform: translateX(18px);
 }
 
 .segmented {
@@ -1843,11 +1874,27 @@ dialog::backdrop {
     gap: 6px;
   }
 
-  .current-location-button {
+  .current-location-switch {
     min-height: 28px;
     border-radius: 12px;
-    padding: 0 8px;
+    padding: 0 3px 0 7px;
+    gap: 5px;
     font-size: 10px;
+  }
+
+  .switch-track {
+    width: 38px;
+    height: 23px;
+    flex-basis: 38px;
+  }
+
+  .switch-thumb {
+    width: 19px;
+    height: 19px;
+  }
+
+  .current-location-switch.active .switch-thumb {
+    transform: translateX(15px);
   }
 
   .segmented {

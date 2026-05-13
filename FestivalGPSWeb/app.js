@@ -116,6 +116,7 @@ let services = {
   base44: null,
   unsubscribeGroup: null
 };
+let currentLocationMode = Boolean(localStore.currentLocationMode);
 let selectedFriendId = "";
 let parsedEvents = [];
 let pendingAuthPhoto = "";
@@ -276,11 +277,12 @@ function bindEvents() {
 
   els.timeRange.addEventListener("input", () => {
     timelineFollowsClock = false;
+    currentLocationMode = false;
     state.selectedMinute = Number(els.timeRange.value);
     saveLocalStore();
     renderAll();
   });
-  els.currentLocationButton.addEventListener("click", showCurrentLocation);
+  els.currentLocationButton.addEventListener("click", toggleCurrentLocationMode);
 
   els.profileName.addEventListener("input", () => {
     renderProfilePreview({ ...currentUser(), name: els.profileName.value, photo: pendingProfilePhoto || currentUser().photo });
@@ -583,7 +585,9 @@ async function handleAuthSubmit(event) {
     els.authForm.reset();
     pendingAuthPhoto = "";
     pendingAuthFile = null;
+    currentLocationMode = true;
     localStore.shareLocation = true;
+    localStore.currentLocationMode = true;
     saveLocalStore();
     if (groupMode === "create") els.authGroupCode.value = generateGroupCode();
     renderAuthPhotoPreview("", "");
@@ -741,6 +745,8 @@ async function signOutUser() {
 
   localStore.session = null;
   localStore.shareLocation = false;
+  localStore.currentLocationMode = false;
+  currentLocationMode = false;
   saveLocalStore();
   localStorage.removeItem(LAST_GROUP_KEY);
   resetState();
@@ -750,11 +756,14 @@ async function signOutUser() {
 
 function toggleLiveLocation() {
   if (locationSharing) {
+    currentLocationMode = false;
     stopLiveLocation();
     renderAll();
     return;
   }
 
+  currentLocationMode = true;
+  saveLocalStore();
   startLiveLocation();
 }
 
@@ -872,6 +881,7 @@ async function handleLiveLocationError(error, options = {}) {
     ? "Location permission off, using schedule"
     : "GPS unavailable, using last seen or schedule";
   if (denied) {
+    currentLocationMode = false;
     await clearOwnLiveLocation({ persist: true });
   }
   if (!options.quiet) {
@@ -1037,8 +1047,8 @@ function renderAll() {
   els.groupCodeLabel.textContent = state.groupCode;
   els.friendGroupCode.textContent = state.groupCode;
   els.profileGroupCode.textContent = state.groupCode;
-  els.currentLocationButton.classList.toggle("active", timelineFollowsClock);
-  els.currentLocationButton.setAttribute("aria-pressed", String(timelineFollowsClock));
+  els.currentLocationButton.classList.toggle("active", currentLocationMode);
+  els.currentLocationButton.setAttribute("aria-pressed", String(currentLocationMode));
   renderLocationState();
 
   [...els.dayButtons.children].forEach((button, index) => {
@@ -1097,17 +1107,25 @@ function syncTimelineToNow(options = {}) {
   return changed;
 }
 
-function showCurrentLocation() {
+function toggleCurrentLocationMode() {
+  currentLocationMode = !currentLocationMode;
+  if (!currentLocationMode) {
+    timelineFollowsClock = false;
+    saveLocalStore();
+    renderAll();
+    return;
+  }
+
   timelineFollowsClock = true;
   const synced = syncTimelineToNow({ render: false });
 
   if (!synced) {
     const day = days[state.selectedDay];
     state.selectedMinute = clamp(minuteForFestivalClock(new Date()), day.start, day.end);
-    saveLocalStore();
   }
 
   if (!locationSharing) startLiveLocation({ quiet: true });
+  saveLocalStore();
   renderAll();
 }
 
@@ -1198,7 +1216,7 @@ function renderPins() {
     }
 
     pin.classList.toggle("selected", friend.id === selectedFriendId);
-    pin.classList.toggle("live", Boolean(liveLocationForFriend(friend)));
+    pin.classList.toggle("live", currentLocationMode && Boolean(liveLocationForFriend(friend)));
     pin.style.setProperty("--friend-color", friend.color || "#53e2ff");
     pin.setAttribute("aria-label", `${friend.name}, ${statusText(friend)}`);
     pin.replaceChildren();
@@ -2027,8 +2045,10 @@ function cleanArtist(value) {
 }
 
 function stageForFriend(friend) {
-  const mapped = mappedLocationForFriend(friend);
-  if (mapped?.stageId) return stageById(mapped.stageId);
+  if (currentLocationMode) {
+    const mapped = mappedLocationForFriend(friend);
+    if (mapped?.stageId) return stageById(mapped.stageId);
+  }
 
   const active = activeEvent(friend);
   if (active) return stageById(active.stageId);
@@ -2053,11 +2073,13 @@ function displayEvent(friend) {
 }
 
 function statusText(friend) {
-  const live = liveLocationForFriend(friend);
-  if (live) return `Live GPS: ${stageById(live.stageId).name}`;
+  if (currentLocationMode) {
+    const live = liveLocationForFriend(friend);
+    if (live) return `Live GPS: ${stageById(live.stageId).name}`;
 
-  const lastKnown = lastKnownLocationForFriend(friend);
-  if (lastKnown) return `Last seen: ${stageById(lastKnown.stageId).name}`;
+    const lastKnown = lastKnownLocationForFriend(friend);
+    if (lastKnown) return `Last seen: ${stageById(lastKnown.stageId).name}`;
+  }
 
   const active = activeEvent(friend);
   if (active) return `Now: ${active.artist}, ${stageById(active.stageId).name}`;
@@ -2072,15 +2094,17 @@ function statusText(friend) {
 }
 
 function locationSourceText(friend) {
-  const live = liveLocationForFriend(friend);
-  const lastKnown = lastKnownLocationForFriend(friend);
   const selectedIsSelf = friend.id === state.user?.id;
 
-  if (live) return `${selectedIsSelf ? "Your" : "Friend"} live GPS ${relativeAge(live.updatedAt)}`;
-  if (lastKnown) return `${navigator.onLine ? "Last GPS" : "Offline last seen"} ${relativeAge(lastKnown.updatedAt)}`;
+  if (currentLocationMode) {
+    const live = liveLocationForFriend(friend);
+    const lastKnown = lastKnownLocationForFriend(friend);
+    if (live) return `${selectedIsSelf ? "Your" : "Friend"} live GPS ${relativeAge(live.updatedAt)}`;
+    if (lastKnown) return `${navigator.onLine ? "Last GPS" : "Offline last seen"} ${relativeAge(lastKnown.updatedAt)}`;
+  }
+
   if (selectedIsSelf && lastLocationProblem) return lastLocationProblem;
-  if (selectedIsSelf && locationSharing) return "Waiting for GPS, using schedule";
-  return "Schedule fallback";
+  return "Timeline";
 }
 
 function stagePlacements() {
@@ -2107,9 +2131,11 @@ function offsetPosition(friend, stage, groups) {
 }
 
 function positionForFriend(friend, stage, groups) {
-  const mapped = mappedLocationForFriend(friend);
-  if (mapped) {
-    return clampMapPosition(screenPositionForLiveLocation(mapped));
+  if (currentLocationMode) {
+    const mapped = mappedLocationForFriend(friend);
+    if (mapped) {
+      return clampMapPosition(screenPositionForLiveLocation(mapped));
+    }
   }
 
   return clampMapPosition(offsetPosition(friend, stage, groups));
@@ -2371,7 +2397,14 @@ function friendsFromGroup(group) {
 function loadLocalStore() {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (stored?.groups) return stored;
+    if (stored?.groups) {
+      return {
+        ...stored,
+        shareLocation: Boolean(stored.shareLocation),
+        currentLocationMode: Boolean(stored.currentLocationMode),
+        pendingLiveLocation: stored.pendingLiveLocation || null
+      };
+    }
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
@@ -2382,6 +2415,7 @@ function loadLocalStore() {
     selectedDay: "friday",
     selectedMinute: days.friday.start,
     shareLocation: false,
+    currentLocationMode: false,
     pendingLiveLocation: null
   };
 }
@@ -2389,6 +2423,7 @@ function loadLocalStore() {
 function saveLocalStore() {
   localStore.selectedDay = state.selectedDay;
   localStore.selectedMinute = state.selectedMinute;
+  localStore.currentLocationMode = currentLocationMode;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(localStore));
 }
 
@@ -2410,6 +2445,7 @@ function cacheCurrentGroup() {
 }
 
 function resetState() {
+  currentLocationMode = Boolean(localStore.currentLocationMode);
   state = {
     selectedDay: localStore.selectedDay || "friday",
     selectedMinute: localStore.selectedMinute || days.friday.start,
