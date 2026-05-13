@@ -260,6 +260,7 @@ function bindElements() {
     "profileGroupCode",
     "copyGroupButton",
     "saveProfileButton",
+    "switchGroupButton",
     "signOutButton",
     "profileMessage",
     "profileFriendList",
@@ -370,6 +371,7 @@ function bindEvents() {
 
   els.saveProfileButton.addEventListener("click", saveProfile);
   els.signOutButton.addEventListener("click", signOutUser);
+  els.switchGroupButton.addEventListener("click", switchGroup);
   els.copyGroupButton.addEventListener("click", copyGroupCode);
   els.copyGroupFromFriendsButton.addEventListener("click", copyGroupCode);
 
@@ -797,6 +799,18 @@ async function signOutUser() {
   els.profileDialog.close();
 }
 
+async function switchGroup() {
+  await signOutUser();
+  setGroupMode("join");
+  els.authName.value = "";
+  els.authPin.value = "";
+  els.authGroupCode.value = "";
+  pendingAuthPhoto = "";
+  pendingAuthFile = null;
+  renderAuthPhotoPreview("", "");
+  requestAnimationFrame(() => els.authGroupCode.focus());
+}
+
 function toggleLiveLocation() {
   if (locationSharing) {
     currentLocationMode = false;
@@ -1214,7 +1228,7 @@ function toggleCurrentLocationMode() {
 
   if (!synced) {
     const day = days[state.selectedDay];
-    state.selectedMinute = clamp(minuteForFestivalClock(new Date()), day.start, day.end);
+    state.selectedMinute = day.start;
   }
 
   if (!locationSharing) startLiveLocation({ quiet: true });
@@ -1266,9 +1280,15 @@ function renderStages() {
     photo.className = "stage-photo";
     if (now?.artist) {
       photo.classList.add("artist-active");
-      photo.textContent = initials(now.artist);
       photo.title = now.artist;
       photo.style.setProperty("--stage-art", artistGradient(now.artist, stage.color));
+      photo.textContent = initials(now.artist);
+      const image = document.createElement("img");
+      image.src = artistImageUrl(now.artist);
+      image.alt = "";
+      image.loading = "lazy";
+      image.addEventListener("error", () => image.remove(), { once: true });
+      photo.append(image);
     } else {
       photo.textContent = stage.short || "";
     }
@@ -2270,6 +2290,7 @@ function stageForFriend(friend) {
   if (currentLocationMode) {
     const mapped = locationOverrideForFriend(friend);
     if (mapped?.stageId) return stageById(mapped.stageId);
+    return stageById("speedway-entry");
   }
 
   const active = activeEvent(friend);
@@ -2309,6 +2330,7 @@ function statusText(friend) {
       const prefix = lastKnown.outsideVenue ? "Outside venue" : "Last seen";
       return `${prefix}: ${stageById(lastKnown.stageId).name}`;
     }
+    return "No live GPS: Speedway Entry";
   }
 
   const active = activeEvent(friend);
@@ -2338,6 +2360,7 @@ function locationSourceText(friend) {
       return `${source} ${relativeAge(lastKnown.updatedAt)}`;
     }
     if (lastKnown) return "Schedule after last GPS";
+    return "No live GPS, pinned to gate";
   }
 
   if (selectedIsSelf && lastLocationProblem) return lastLocationProblem;
@@ -2599,18 +2622,26 @@ function currentUser() {
   };
 }
 
+function friendWithDisplayName(friend) {
+  return {
+    ...friend,
+    name: cleanName(friend?.name || "Friend")
+  };
+}
+
 function avatarElement(friend, className) {
   const avatar = document.createElement("span");
+  const displayFriend = friendWithDisplayName(friend);
   avatar.className = className;
-  avatar.style.setProperty("--friend-color", friend.color || "#53e2ff");
+  avatar.style.setProperty("--friend-color", displayFriend.color || "#53e2ff");
 
-  if (friend.photo) {
+  if (displayFriend.photo) {
     const image = document.createElement("img");
-    image.src = friend.photo;
+    image.src = displayFriend.photo;
     image.alt = "";
     avatar.append(image);
   } else {
-    avatar.textContent = initials(friend.name);
+    avatar.textContent = initials(displayFriend.name);
   }
 
   return avatar;
@@ -3236,10 +3267,11 @@ function initials(name) {
   const letters = cleanName(name)
     .split(/\s+/)
     .slice(0, 2)
-    .map((part) => part[0])
+    .map((part) => part.match(/[\p{L}\p{N}]/u)?.[0] || "")
+    .filter(Boolean)
     .join("")
     .toUpperCase();
-  return letters || "?";
+  return letters || "Y";
 }
 
 function cleanName(name) {
@@ -3266,6 +3298,11 @@ function artistGradient(name, fallbackColor = "#007aff") {
   const first = palette[hash % palette.length];
   const second = palette[(hash >> 3) % palette.length] || fallbackColor;
   return `linear-gradient(135deg, #ffffff 0%, ${first} 42%, ${second} 100%)`;
+}
+
+function artistImageUrl(name) {
+  const seed = encodeURIComponent(String(name || "EDC").replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim() || "EDC");
+  return `https://api.dicebear.com/9.x/initials/svg?seed=${seed}&radius=50&fontFamily=Inter&fontWeight=800&backgroundType=gradientLinear`;
 }
 
 function cryptoId() {

@@ -9,12 +9,12 @@
     <meta name="apple-mobile-web-app-title" content="Festival Buddy">
     <meta name="apple-itunes-app" content="app-id=561212119">
     <title>Festival Buddy</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260513-1">
+    <link rel="manifest" href="manifest.webmanifest?v=20260513-2">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260512-28">
-    <link rel="stylesheet" href="styles.css?v=20260513-1">
+    <link rel="stylesheet" href="styles.css?v=20260513-2">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260513-1"></script>
+    <script type="module" src="app.js?v=20260513-2"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Join Festival Buddy group">
@@ -25,12 +25,12 @@
       </div>
       <form id="authForm" class="auth-card">
         <div class="auth-kicker">
-          <span class="brand-mark">FB</span>
+          <a class="yang-link compact" href="https://www.instagram.com/yangyangyy/" target="_blank" rel="noopener">Questions ask Yang</a>
           <span id="cloudBadge">Secure group sync</span>
         </div>
         <p class="friend-note">Friends use only. Questions? Ask @yangyangyy.</p>
-        <h1>Meet your crew under the electric sky.</h1>
-        <p class="auth-copy">Enter your user name, add a profile pin, then start a group or join your friend's code. Your name and group code bring your saved schedule back.</p>
+        <h1>Find your crew. Own the grid.</h1>
+        <p class="auth-copy">Start or join a private crew code, upload your schedule, and switch between live location and timeline fallback when the signal gets weird.</p>
 
         <div class="auth-grid">
           <label>
@@ -75,7 +75,7 @@
     <div id="appShell" class="app-shell" hidden>
       <header class="topbar">
         <div class="brand">
-          <span class="brand-mark">FB</span>
+          <a class="yang-link" href="https://www.instagram.com/yangyangyy/" target="_blank" rel="noopener">Questions ask Yang</a>
           <div>
             <h1>Festival Buddy</h1>
             <p id="currentContext">Friday May 15 • 5:00 PM</p>
@@ -220,7 +220,8 @@
         </section>
         <div class="button-row">
           <button id="saveProfileButton" class="action-button" type="button">Save</button>
-          <button id="signOutButton" class="action-button secondary" type="button">Sign out</button>
+          <button id="switchGroupButton" class="action-button secondary" type="button">Switch group</button>
+          <button id="signOutButton" class="action-button secondary danger" type="button">Log out</button>
         </div>
         <p id="profileMessage" class="muted"></p>
       </form>
