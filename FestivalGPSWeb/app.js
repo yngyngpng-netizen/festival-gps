@@ -795,6 +795,9 @@ async function enterBase44GroupByName(groupCode, profile, pin) {
 
   const friends = activeMembers(allMembers);
   const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  if (!profile.photo && !existing?.photo) {
+    throw new Error("Upload a profile picture before entering the app.");
+  }
   const ownerExists = friends.some((friend) => friend.isGroupOwner);
   const secured = await securedMemberProfile(existing, {
     ...profile,
@@ -872,6 +875,9 @@ async function enterLocalGroupByName(profile, groupCode, pin) {
 
   const friends = activeMembers(allMembers);
   const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  if (!profile.photo && !existing?.photo) {
+    throw new Error("Upload a profile picture before entering the app.");
+  }
   const ownerExists = friends.some((friend) => friend.isGroupOwner);
   const secured = await securedMemberProfile(existing, {
     ...profile,
@@ -1264,7 +1270,7 @@ function openProfileSheet() {
   els.profileName.value = user.name || "";
   els.profileGroupCode.textContent = state.groupCode || "NO GROUP";
   els.profileMessage.textContent = currentUserCanManageGroup()
-    ? "Manager mode: remove stale people from your crew list."
+    ? "Manager mode: copy the group code to invite friends or remove stale people."
     : "";
   pendingProfilePhoto = "";
   renderProfilePreview(user);
@@ -2965,9 +2971,13 @@ function stageForFriend(friend) {
   if (currentLocationMode) {
     const mapped = locationOverrideForFriend(friend);
     if (mapped?.stageId) return stageById(mapped.stageId);
-    return stageById("speedway-entry");
+    return scheduledStageForFriend(friend, { includeUpcoming: true }) || stageById("speedway-entry");
   }
 
+  return scheduledStageForFriend(friend) || stageById("speedway-entry");
+}
+
+function scheduledStageForFriend(friend, options = {}) {
   const active = activeEvent(friend);
   if (active) return stageById(active.stageId);
 
@@ -2976,7 +2986,12 @@ function stageForFriend(friend) {
     .sort((a, b) => a.start - b.start)
     .at(-1);
 
-  return previous ? stageById(previous.stageId) : stageById("speedway-entry");
+  if (!previous && options.includeUpcoming) {
+    const display = displayEvent(friend);
+    if (display) return stageById(display.stageId);
+  }
+
+  return previous ? stageById(previous.stageId) : null;
 }
 
 function activeEvent(friend) {
@@ -2997,13 +3012,17 @@ function statusText(friend) {
     const live = liveLocationForFriend(friend);
     if (live) {
       const prefix = live.outsideVenue ? "Outside venue" : "Live GPS";
-      return `${prefix}: ${stageById(live.stageId).name}`;
+      return `${prefix}: Grid ${gridForLiveLocation(live)}, ${stageById(live.stageId).name}`;
     }
 
     const lastKnown = lastKnownLocationForFriend(friend);
+    if (lastKnown && staleLocationShouldUseSchedule(friend, lastKnown)) {
+      const fallback = activeEvent(friend) || displayEvent(friend);
+      if (fallback) return `Schedule fallback: ${fallback.artist}, ${stageById(fallback.stageId).name}`;
+    }
     if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) {
       const prefix = lastKnown.outsideVenue ? "Outside venue" : "Last seen";
-      return `${prefix}: ${stageById(lastKnown.stageId).name}`;
+      return `${prefix}: Grid ${gridForLiveLocation(lastKnown)}, ${stageById(lastKnown.stageId).name}`;
     }
     const active = activeEvent(friend);
     if (active) return `No signal: ${active.artist}, ${stageById(active.stageId).name}`;
@@ -3030,11 +3049,15 @@ function locationSourceText(friend) {
     const lastKnown = lastKnownLocationForFriend(friend);
     if (live) {
       const source = live.outsideVenue ? "outside EDC, pinned to gate" : "live GPS";
-      return `${selectedIsSelf ? "Your" : "Friend"} ${source} ${relativeAge(live.updatedAt)}`;
+      return `${selectedIsSelf ? "Your" : "Friend"} ${source} at grid ${gridForLiveLocation(live)} ${relativeAge(live.updatedAt)}`;
+    }
+    if (lastKnown && staleLocationShouldUseSchedule(friend, lastKnown)) {
+      const fallback = activeEvent(friend) || displayEvent(friend);
+      if (fallback) return `Last seen grid ${gridForLiveLocation(lastKnown)} ${relativeAge(lastKnown.updatedAt)}, using schedule at ${stageById(fallback.stageId).name}`;
     }
     if (lastKnown && !scheduleSupersedesLastLocation(friend, lastKnown)) {
       const source = lastKnown.outsideVenue ? "Last outside EDC, pinned to gate" : (navigator.onLine ? "Last GPS" : "Offline last seen");
-      return `${source} ${relativeAge(lastKnown.updatedAt)}`;
+      return `${source} grid ${gridForLiveLocation(lastKnown)} ${relativeAge(lastKnown.updatedAt)}`;
     }
     if (lastKnown) return "Schedule after last GPS";
     return "No live GPS, pinned to gate";
@@ -3238,6 +3261,7 @@ function locationOverrideForFriend(friend) {
 
   const lastKnown = lastKnownLocationForFriend(friend);
   if (!lastKnown) return null;
+  if (staleLocationShouldUseSchedule(friend, lastKnown)) return null;
   return scheduleSupersedesLastLocation(friend, lastKnown) ? null : lastKnown;
 }
 
@@ -3249,6 +3273,20 @@ function lastKnownLocationForFriend(friend) {
 
 function locationCanPin(live) {
   return Boolean(live && (live.insideFestival || live.outsideVenue));
+}
+
+function staleLocationShouldUseSchedule(friend, lastKnown) {
+  if (!liveLocationIsStale(lastKnown)) return false;
+  return Boolean(activeEvent(friend) || displayEvent(friend));
+}
+
+function liveLocationIsStale(live) {
+  const updatedAt = Date.parse(live?.updatedAt || "");
+  return Number.isFinite(updatedAt) && Date.now() - updatedAt > LIVE_LOCATION_MAX_AGE_MS;
+}
+
+function gridForLiveLocation(live) {
+  return gridForPosition(screenPositionForLiveLocation(live));
 }
 
 function scheduleSupersedesLastLocation(friend, lastKnown) {
