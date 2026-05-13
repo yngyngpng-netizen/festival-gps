@@ -766,7 +766,7 @@ async function handleAuthSubmit(event) {
 
   try {
     if (!rawName) throw new Error("Enter your user name.");
-    if (!validPin(pin)) throw new Error("Create a 4-6 digit PIN.");
+    if (!validPin(pin)) throw new Error("Enter a 4-6 digit PIN.");
     if (!groupCode) throw new Error("Enter a group code.");
     requestLocationPermissionOnEntry();
 
@@ -3814,7 +3814,7 @@ async function securedMemberProfile(existing, profile, groupCode, pin) {
   if (existing?.pinHash) {
     const pinMatches = await verifyPin(pin, existing.pinHash, existing.pinSalt, groupCode);
     if (!pinMatches) {
-      throw new Error("That name already exists in this group. Enter the correct PIN or choose another name.");
+      throw new Error("PIN is not correct.");
     }
   }
 
@@ -4613,7 +4613,7 @@ function cryptoId() {
 
 function humanAuthError(error) {
   const code = error.code || "";
-  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "That PIN does not match this name.";
+  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "PIN is not correct.";
   if (code.includes("weak-password")) return "Use a 4-6 digit PIN.";
   if (code.includes("network")) return "Network issue. Try again when your connection is steady.";
   if (String(error.message || "").toLowerCase().includes("unauthorized")) return "That group or PIN could not be verified.";
