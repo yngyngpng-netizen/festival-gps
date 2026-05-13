@@ -1,6 +1,6 @@
-# Festival GPS
+# Festival Buddy
 
-Festival GPS is a SwiftUI iOS prototype and Safari-installable web app for finding friends at EDC Las Vegas 2026. It shows the festival map, places each friend as a profile-photo pin, reads uploaded schedule screenshots with OCR, and moves pins between stages as the bottom timeline is dragged.
+Festival Buddy is a SwiftUI iOS prototype and Safari-installable web app for finding friends at EDC Las Vegas 2026. It shows the festival map, places each friend as a profile-photo pin, reads uploaded schedule screenshots with OCR, and moves pins between stages as the bottom timeline is dragged.
 
 ## Web App
 

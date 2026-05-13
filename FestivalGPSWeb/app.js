@@ -225,11 +225,7 @@ function bindElements() {
     "photoCropCancel",
     "scheduleDialog",
     "scheduleImage",
-    "ocrStatus",
-    "ocrText",
-    "demoScheduleButton",
-    "applyScheduleButton",
-    "parsedSchedule"
+    "ocrStatus"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -268,7 +264,6 @@ function bindEvents() {
 
   els.scheduleButton.addEventListener("click", () => {
     els.scheduleImage.value = "";
-    els.ocrText.value = "";
     els.ocrStatus.textContent = "";
     parsedEvents = [];
     renderParsedSchedule();
@@ -322,30 +317,6 @@ function bindEvents() {
     if (files.length) await recognizeScheduleFiles(files);
   });
 
-  els.ocrText.addEventListener("input", () => {
-    parsedEvents = parseSchedule(els.ocrText.value);
-    renderParsedSchedule();
-  });
-
-  els.demoScheduleButton.addEventListener("click", () => {
-    els.ocrText.value = [
-      "Friday May 15",
-      "8:00 PM - 9:00 PM House Warmup Stereo Bloom",
-      "9:30 PM - 10:45 PM Mainstage Set Kinetic Field",
-      "11:30 PM - 12:30 AM Bass Meetup Basspod",
-      "Saturday May 16",
-      "8:15 PM - 9:15 PM Desert House Cosmic Meadow",
-      "10:00 PM - 11:20 PM Circuit Run Circuit Grounds",
-      "Sunday May 17",
-      "12:30 AM - 1:30 AM Neon Finale Neon Garden"
-    ].join("\n");
-    parsedEvents = parseSchedule(els.ocrText.value);
-    els.ocrStatus.textContent = `${parsedEvents.length} sets generated.`;
-    renderParsedSchedule();
-  });
-
-  els.applyScheduleButton.addEventListener("click", applySchedule);
-
   window.addEventListener("online", () => {
     if (state.user?.id && localStore.shareLocation && !locationSharing) {
       startLiveLocation({ quiet: true });
@@ -354,6 +325,9 @@ function bindEvents() {
     renderAll();
   });
   window.addEventListener("offline", renderAll);
+  window.addEventListener("pagehide", captureLastLocationBeforeBackground);
+  window.addEventListener("pageshow", resumeLocationAfterReturn);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("resize", syncMapOverlays);
 }
 
@@ -929,6 +903,40 @@ async function syncPendingLiveLocation() {
   }
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState === "hidden") {
+    captureLastLocationBeforeBackground();
+    return;
+  }
+
+  resumeLocationAfterReturn();
+}
+
+function captureLastLocationBeforeBackground() {
+  if (!state.user?.id || !localStore.shareLocation || !navigator.geolocation) return;
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      handleLivePosition(position);
+    },
+    () => {},
+    {
+      enableHighAccuracy: true,
+      maximumAge: 5 * 1000,
+      timeout: 4500
+    }
+  );
+}
+
+function resumeLocationAfterReturn() {
+  if (!state.user?.id) return;
+  if (localStore.shareLocation && !locationSharing) {
+    startLiveLocation({ quiet: true });
+  }
+  syncPendingLiveLocation();
+  renderAll();
+}
+
 function renderLocationState() {
   const selected = selectedFriend();
   if (els.locationButton) {
@@ -1382,6 +1390,7 @@ function renderAvatarInto(container, friend) {
 }
 
 function renderParsedSchedule() {
+  if (!els.parsedSchedule) return;
   els.parsedSchedule.replaceChildren();
 
   if (!parsedEvents.length) {
@@ -1411,7 +1420,6 @@ async function recognizeSchedule(file) {
 async function recognizeScheduleFiles(files) {
   parsedEvents = [];
   renderParsedSchedule();
-  els.ocrText.value = "";
   els.ocrStatus.textContent = files.length > 1
     ? `Reading ${files.length} schedule pictures...`
     : "Reading schedule picture...";
@@ -1510,12 +1518,11 @@ async function recognizeScheduleFile(file) {
 }
 
 async function acceptRecognizedSchedule(result, sourceLabel) {
-  els.ocrText.value = result.text || "";
   parsedEvents = result.events || [];
   renderParsedSchedule();
 
   if (!parsedEvents.length) {
-    els.ocrStatus.textContent = "No sets generated. Crop to the schedule rows or paste the visible schedule text here.";
+    els.ocrStatus.textContent = "No sets generated. Try a clearer Insomniac schedule screenshot.";
     return;
   }
 
@@ -1524,7 +1531,12 @@ async function acceptRecognizedSchedule(result, sourceLabel) {
     const prefix = sourceLabel ? `${sourceLabel}: ` : "";
     els.ocrStatus.textContent = saved
       ? `${prefix}${parsedEvents.length} sets generated and saved to your timeline.`
-      : `${prefix}${parsedEvents.length} sets generated. Tap Apply to save them.`;
+      : `${prefix}${parsedEvents.length} sets generated.`;
+    if (saved) {
+      window.setTimeout(() => {
+        if (els.scheduleDialog.open) els.scheduleDialog.close();
+      }, 900);
+    }
   } catch (error) {
     els.ocrStatus.textContent = `${parsedEvents.length} sets generated, but saving failed: ${error.message || error}`;
   }
