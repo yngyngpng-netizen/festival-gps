@@ -18,8 +18,16 @@
     },
     "email": {
       "type": "string",
-      "format": "email",
       "maxLength": 160
+    },
+    "pinHash": {
+      "type": "string",
+      "description": "Client-side hashed 4-6 digit PIN for name + group recovery.",
+      "maxLength": 220
+    },
+    "pinSalt": {
+      "type": "string",
+      "maxLength": 80
     },
     "photo": {
       "type": "string",
@@ -113,14 +121,8 @@
   "required": ["userId", "groupCode", "name"],
   "rls": {
     "create": true,
-    "read": {
-      "data.groupCode": "{{user.data.festivalGroupCode}}"
-    },
-    "update": {
-      "created_by_id": "{{user.id}}"
-    },
-    "delete": {
-      "created_by_id": "{{user.id}}"
-    }
+    "read": true,
+    "update": true,
+    "delete": false
   }
 }

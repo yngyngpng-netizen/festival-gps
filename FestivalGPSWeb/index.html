@@ -11,12 +11,12 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/icon.svg">
-    <link rel="stylesheet" href="styles.css?v=20260512-14">
+    <link rel="stylesheet" href="styles.css?v=20260512-16">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260512-14"></script>
+    <script type="module" src="app.js?v=20260512-16"></script>
   </head>
   <body>
-    <section id="onboarding" class="onboarding" aria-label="Create Festival GPS account">
+    <section id="onboarding" class="onboarding" aria-label="Join Festival GPS group">
       <div class="onboarding-map" aria-hidden="true">
         <span class="constellation c1"></span>
         <span class="constellation c2"></span>
@@ -28,16 +28,16 @@
           <span id="cloudBadge">Secure group sync</span>
         </div>
         <h1>Meet your crew under the electric sky.</h1>
-        <p class="auth-copy">Enter with your email, add a profile pin, then start a group or join your friend's code before uploading your EDC schedule.</p>
+        <p class="auth-copy">Enter your user name, add a profile pin, then start a group or join your friend's code. Your name and group code bring your saved schedule back.</p>
 
         <div class="auth-grid">
           <label>
-            <span>Name</span>
-            <input id="authName" type="text" autocomplete="name" placeholder="Your festival name" required>
+            <span>User Name</span>
+            <input id="authName" type="text" autocomplete="name" placeholder="Your user name" required>
           </label>
           <label>
-            <span>Email</span>
-            <input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required>
+            <span>4-6 digit PIN</span>
+            <input id="authPin" type="password" inputmode="numeric" autocomplete="off" pattern="[0-9]*" maxlength="6" placeholder="1234" required>
           </label>
           <div class="group-entry">
             <span>Are you starting a group or joining one?</span>
@@ -53,15 +53,6 @@
               </button>
             </div>
           </div>
-        </div>
-
-        <div id="verificationPanel" class="verification-panel" hidden>
-          <strong>Check your email</strong>
-          <label>
-            <span>Email verification code</span>
-            <input id="authVerificationCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code">
-          </label>
-          <button id="resendCodeButton" class="text-button" type="button">Send a new code</button>
         </div>
 
         <div class="photo-card">
@@ -244,11 +235,45 @@
       </form>
     </dialog>
 
+    <dialog id="photoCropDialog">
+      <form method="dialog" class="sheet crop-sheet">
+        <header class="sheet-header">
+          <div>
+            <span class="eyebrow">Profile picture</span>
+            <h2>Crop your photo</h2>
+          </div>
+          <button id="photoCropCancel" class="icon-button ghost" type="button" aria-label="Cancel crop">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 12.6 12.6-1.4 1.4L5 6.4 6.4 5Zm12.6 1.4L6.4 19 5 17.6 17.6 5 19 6.4Z"/></svg>
+          </button>
+        </header>
+        <div class="crop-preview">
+          <canvas id="photoCropCanvas" width="320" height="320"></canvas>
+        </div>
+        <div class="crop-controls">
+          <label>
+            <span>Zoom</span>
+            <input id="photoCropZoom" type="range" min="1" max="3" step="0.01" value="1">
+          </label>
+          <label>
+            <span>Move sideways</span>
+            <input id="photoCropX" type="range" min="-1" max="1" step="0.01" value="0">
+          </label>
+          <label>
+            <span>Move up/down</span>
+            <input id="photoCropY" type="range" min="-1" max="1" step="0.01" value="0">
+          </label>
+        </div>
+        <div class="button-row">
+          <button id="photoCropApply" class="action-button" type="button">Use cropped photo</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="scheduleDialog">
       <form method="dialog" class="sheet tall">
         <header class="sheet-header">
           <div>
-            <span class="eyebrow">Friday, Saturday, Sunday</span>
+            <span class="eyebrow">Auto-detect days</span>
             <h2>Upload Schedule</h2>
           </div>
           <button class="icon-button ghost" value="cancel" type="submit" aria-label="Close">
@@ -257,9 +282,9 @@
         </header>
         <label class="schedule-upload-card" for="scheduleImage">
           <span class="eyebrow">Schedule Upload</span>
-          <strong>Upload your schedule picture</strong>
-          <small>Use the exported PNG or screenshot from Insomniac.</small>
-          <input id="scheduleImage" type="file" accept="image/*">
+          <strong>Upload schedule screenshots</strong>
+          <small>Select one screenshot or all three Friday, Saturday, and Sunday images. New uploads replace your old saved schedule.</small>
+          <input id="scheduleImage" type="file" accept="image/*" multiple>
         </label>
         <div class="schedule-source">
           <strong>Build your Insomniac schedule</strong>
@@ -269,16 +294,8 @@
             <a class="action-button secondary link-button" href="https://lasvegas.electricdaisycarnival.com/lineup/set-times/" target="_blank" rel="noopener">EDC set times</a>
           </div>
         </div>
-        <div class="form-grid">
-          <label for="scheduleDay">Default day</label>
-          <select id="scheduleDay">
-            <option value="friday">Friday May 15</option>
-            <option value="saturday">Saturday May 16</option>
-            <option value="sunday">Sunday May 17</option>
-          </select>
-        </div>
         <div id="ocrStatus" class="progress-line"></div>
-        <textarea id="ocrText" class="ocr-text" rows="8" spellcheck="false" placeholder="OCR text appears here. You can edit it before applying."></textarea>
+        <textarea id="ocrText" class="ocr-text" rows="8" spellcheck="false" placeholder="OCR text appears here. You can edit it before applying. Days are detected from the text."></textarea>
         <div class="button-row">
           <button id="demoScheduleButton" class="action-button secondary" type="button">Demo</button>
           <button id="applyScheduleButton" class="action-button" type="button">Apply to my pin</button>

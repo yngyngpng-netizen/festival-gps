@@ -1,9 +1,7 @@
 import { BASE44_CONFIG, MAPKIT_CONFIG, base44IsConfigured } from "./base44-config.js";
-import { firebaseConfig, firebaseIsConfigured } from "./firebase-config.js";
 
 const STORAGE_KEY = "festival-gps-pwa-v2";
 const LAST_GROUP_KEY = "festival-gps-last-group";
-const EMAIL_ONLY_SECRET = "festival-gps-edc-2026-email-only-v1";
 const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const EDC_GEO_MARGIN = 0.0015;
@@ -109,19 +107,15 @@ let localStore = loadLocalStore();
 let services = {
   cloud: false,
   provider: "local",
-  auth: null,
-  db: null,
   base44: null,
   unsubscribeGroup: null
 };
-let fb = {};
 let selectedFriendId = "";
 let parsedEvents = [];
 let pendingAuthPhoto = "";
 let pendingProfilePhoto = "";
 let pendingAuthFile = null;
 let pendingProfileFile = null;
-let pendingVerification = null;
 let groupMode = "create";
 let locationWatchId = null;
 let locationSharing = false;
@@ -131,6 +125,7 @@ let timelineClockId = null;
 let timelineFollowsClock = true;
 let lastLocationProblem = "";
 let topFeedbackTimer = null;
+let cropState = null;
 let mapkitState = {
   ready: false,
   loading: false,
@@ -139,8 +134,6 @@ let mapkitState = {
 };
 
 const els = {};
-
-class VerificationPendingError extends Error {}
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -162,9 +155,8 @@ function bindElements() {
     "appShell",
     "authForm",
     "authName",
-    "authEmail",
+    "authPin",
     "authGroupCode",
-    "authVerificationCode",
     "authPhoto",
     "authPhotoPreview",
     "authSubmitButton",
@@ -172,8 +164,6 @@ function bindElements() {
     "joinGroupButton",
     "groupModeHint",
     "regenerateGroupButton",
-    "resendCodeButton",
-    "verificationPanel",
     "authMessage",
     "cloudBadge",
     "currentContext",
@@ -217,8 +207,14 @@ function bindElements() {
     "friendDetailNow",
     "friendDetailSource",
     "friendDetailSchedule",
+    "photoCropDialog",
+    "photoCropCanvas",
+    "photoCropZoom",
+    "photoCropX",
+    "photoCropY",
+    "photoCropApply",
+    "photoCropCancel",
     "scheduleDialog",
-    "scheduleDay",
     "scheduleImage",
     "ocrStatus",
     "ocrText",
@@ -233,23 +229,28 @@ function bindElements() {
 function bindEvents() {
   els.authForm.addEventListener("submit", handleAuthSubmit);
   els.authName.addEventListener("input", () => renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value));
+  els.authPin.addEventListener("input", () => {
+    els.authPin.value = cleanPin(els.authPin.value);
+    clearVerificationStep();
+  });
   els.createGroupButton.addEventListener("click", () => setGroupMode("create"));
   els.joinGroupButton.addEventListener("click", () => setGroupMode("join"));
   els.regenerateGroupButton.addEventListener("click", () => {
     els.authGroupCode.value = generateGroupCode();
-    clearVerificationStep();
   });
-  els.resendCodeButton.addEventListener("click", resendVerificationCode);
-  els.authEmail.addEventListener("input", clearVerificationStep);
   els.authGroupCode.addEventListener("input", clearVerificationStep);
-  els.authVerificationCode.addEventListener("input", () => {
-    els.authVerificationCode.value = els.authVerificationCode.value.replace(/\D/g, "").slice(0, 6);
-  });
   els.authPhoto.addEventListener("change", async () => {
     const file = els.authPhoto.files?.[0];
     pendingAuthFile = file || null;
-    pendingAuthPhoto = file ? await imageFileToDataUrl(file) : "";
-    renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value);
+    try {
+      pendingAuthPhoto = file ? await openPhotoCropper(file, "auth") : "";
+      pendingAuthFile = pendingAuthPhoto ? dataUrlToFile(pendingAuthPhoto, "festival-profile.jpg") : null;
+      renderAuthPhotoPreview(pendingAuthPhoto, els.authName.value);
+    } catch (error) {
+      pendingAuthPhoto = "";
+      pendingAuthFile = null;
+      els.authMessage.textContent = error.message || String(error);
+    }
   });
 
   els.copyCodeButton.addEventListener("click", copyGroupCode);
@@ -257,7 +258,6 @@ function bindEvents() {
   els.locationButton.addEventListener("click", toggleLiveLocation);
 
   els.scheduleButton.addEventListener("click", () => {
-    els.scheduleDay.value = state.selectedDay;
     els.scheduleImage.value = "";
     els.ocrText.value = "";
     els.ocrStatus.textContent = "";
@@ -280,8 +280,25 @@ function bindEvents() {
   els.profilePhoto.addEventListener("change", async () => {
     const file = els.profilePhoto.files?.[0];
     pendingProfileFile = file || null;
-    pendingProfilePhoto = file ? await imageFileToDataUrl(file) : "";
-    renderProfilePreview({ ...currentUser(), name: els.profileName.value, photo: pendingProfilePhoto || currentUser().photo });
+    try {
+      pendingProfilePhoto = file ? await openPhotoCropper(file, "profile") : "";
+      pendingProfileFile = pendingProfilePhoto ? dataUrlToFile(pendingProfilePhoto, "festival-profile.jpg") : null;
+      renderProfilePreview({ ...currentUser(), name: els.profileName.value, photo: pendingProfilePhoto || currentUser().photo });
+    } catch (error) {
+      pendingProfilePhoto = "";
+      pendingProfileFile = null;
+      els.profileMessage.textContent = error.message || String(error);
+    }
+  });
+
+  [els.photoCropZoom, els.photoCropX, els.photoCropY].forEach((control) => {
+    control.addEventListener("input", drawPhotoCropPreview);
+  });
+  els.photoCropApply.addEventListener("click", applyPhotoCrop);
+  els.photoCropCancel.addEventListener("click", cancelPhotoCrop);
+  els.photoCropDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    cancelPhotoCrop();
   });
 
   els.saveProfileButton.addEventListener("click", saveProfile);
@@ -289,18 +306,13 @@ function bindEvents() {
   els.copyGroupButton.addEventListener("click", copyGroupCode);
   els.copyGroupFromFriendsButton.addEventListener("click", copyGroupCode);
 
-  els.scheduleDay.addEventListener("change", () => {
-    parsedEvents = parseSchedule(els.ocrText.value, els.scheduleDay.value);
-    renderParsedSchedule();
-  });
-
   els.scheduleImage.addEventListener("change", async () => {
-    const file = els.scheduleImage.files?.[0];
-    if (file) await recognizeSchedule(file);
+    const files = [...(els.scheduleImage.files || [])];
+    if (files.length) await recognizeScheduleFiles(files);
   });
 
   els.ocrText.addEventListener("input", () => {
-    parsedEvents = parseSchedule(els.ocrText.value, els.scheduleDay.value);
+    parsedEvents = parseSchedule(els.ocrText.value);
     renderParsedSchedule();
   });
 
@@ -316,7 +328,7 @@ function bindEvents() {
       "Sunday May 17",
       "12:30 AM - 1:30 AM Neon Finale Neon Garden"
     ].join("\n");
-    parsedEvents = parseSchedule(els.ocrText.value, els.scheduleDay.value);
+    parsedEvents = parseSchedule(els.ocrText.value);
     els.ocrStatus.textContent = `${parsedEvents.length} sets generated.`;
     renderParsedSchedule();
   });
@@ -451,12 +463,9 @@ async function initCloud() {
     if (started) return;
   }
 
-  if (!firebaseIsConfigured()) {
-    els.cloudBadge.textContent = "Local demo store";
-    return;
-  }
-
-  await initFirebaseCloud();
+  services.cloud = false;
+  services.provider = "local";
+  els.cloudBadge.textContent = "Local group store";
 }
 
 async function initBase44Cloud() {
@@ -468,74 +477,45 @@ async function initBase44Cloud() {
     services.base44 = createClient(clientConfig);
     services.cloud = true;
     services.provider = "base44";
-    els.cloudBadge.textContent = "Base44 secure sync";
+    els.cloudBadge.textContent = "Group-code sync";
 
-    const isAuthenticated = await services.base44.auth.isAuthenticated().catch(() => false);
-    if (isAuthenticated) {
-      const account = await services.base44.auth.me();
-      const lastGroup = normalizeGroupCode(localStorage.getItem(LAST_GROUP_KEY) || account.festivalGroupCode || "");
-      if (lastGroup) {
-        await enterBase44Group(lastGroup, profileFromBase44User(account, lastGroup), { preserveExisting: true });
-      }
-    }
+    await resumeBase44Session();
 
     return true;
   } catch (error) {
     services.cloud = false;
     services.provider = "local";
     services.base44 = null;
-    els.cloudBadge.textContent = firebaseIsConfigured() ? "Firebase secure sync" : "Local demo store";
+    els.cloudBadge.textContent = "Local group store";
     els.authMessage.textContent = `Base44 did not start: ${error.message || error}`;
     return false;
   }
 }
 
-async function initFirebaseCloud() {
+async function resumeBase44Session() {
+  const session = localStore.session;
+  const groupCode = normalizeGroupCode(session?.groupCode || localStorage.getItem(LAST_GROUP_KEY) || "");
+  const uid = session?.uid || "";
+  if (!groupCode || !uid) return false;
+
   try {
-    const [appModule, authModule, firestoreModule] = await Promise.all([
-      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
-      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"),
-      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js")
-    ]);
-    fb = { ...appModule, ...authModule, ...firestoreModule };
+    const records = await services.base44.entities.CrewMember.filter({ groupCode });
+    state.friends = records
+      .map((record) => normalizeMember(record))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    const member = state.friends.find((friend) => friend.id === uid || friend.userId === uid);
+    if (!member) return false;
 
-    const app = fb.initializeApp(firebaseConfig);
-    services.auth = fb.getAuth(app);
-    services.db = fb.getFirestore(app);
-    services.cloud = true;
-    services.provider = "firebase";
-    els.cloudBadge.textContent = "Firebase secure sync";
-
-    fb.onAuthStateChanged(services.auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        if (!localStore.session) {
-          resetState();
-          renderAuthGate();
-        }
-        return;
-      }
-
-      const lastGroup = localStorage.getItem(LAST_GROUP_KEY);
-      state.user = {
-        id: firebaseUser.uid,
-        email: firebaseUser.email || "",
-        name: firebaseUser.displayName || "You",
-        photo: "",
-        color: randomColor(),
-        schedule: []
-      };
-
-      if (lastGroup) {
-        await enterCloudGroup(lastGroup, state.user, { preserveExisting: true });
-      } else {
-        renderAuthGate();
-      }
-    });
-  } catch (error) {
-    services.cloud = false;
-    services.provider = "local";
-    els.cloudBadge.textContent = "Local demo store";
-    els.authMessage.textContent = `Firebase did not start: ${error.message || error}`;
+    state.user = member;
+    state.groupCode = groupCode;
+    selectedFriendId = member.id;
+    localStore.session = { uid: member.id, groupCode };
+    saveLocalStore();
+    localStorage.setItem(LAST_GROUP_KEY, groupCode);
+    await subscribeToBase44Group(groupCode);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -560,21 +540,13 @@ async function handleAuthSubmit(event) {
   setBusy(true);
   els.authMessage.textContent = "";
 
-  if (pendingVerification) {
-    try {
-      await verifyBase44Code();
-      return;
-    } catch (error) {
-      els.authMessage.textContent = humanAuthError(error);
-      setBusy(false);
-      return;
-    }
-  }
-
+  const rawName = els.authName.value.trim();
+  const pin = cleanPin(els.authPin.value);
   const profile = {
     id: "",
-    name: cleanName(els.authName.value),
-    email: els.authEmail.value.trim().toLowerCase(),
+    userId: "",
+    name: cleanName(rawName),
+    email: "",
     photo: pendingAuthPhoto,
     color: randomColor(),
     schedule: []
@@ -582,153 +554,39 @@ async function handleAuthSubmit(event) {
   const groupCode = normalizeGroupCode(els.authGroupCode.value);
 
   try {
-    if (!validEmail(profile.email)) throw new Error("Enter a valid email address.");
+    if (!rawName) throw new Error("Enter your user name.");
+    if (!validPin(pin)) throw new Error("Create a 4-6 digit PIN.");
     if (!groupCode) throw new Error("Enter a group code.");
-    const password = await emailOnlyPassword(profile.email);
 
     if (services.provider === "base44") {
-      await authenticateWithBase44(profile, password, groupCode);
-    } else if (services.provider === "firebase") {
-      await authenticateWithFirebase(profile, password, groupCode);
+      await enterBase44GroupByName(groupCode, profile, pin);
     } else {
-      enterLocalGroup(profile, groupCode);
+      await enterLocalGroupByName(profile, groupCode, pin);
     }
 
     els.authForm.reset();
     pendingAuthPhoto = "";
     pendingAuthFile = null;
-    clearVerificationStep();
     if (groupMode === "create") els.authGroupCode.value = generateGroupCode();
     renderAuthPhotoPreview("", "");
     renderAuthGate();
   } catch (error) {
-    if (!(error instanceof VerificationPendingError)) {
-      els.authMessage.textContent = humanAuthError(error);
-    }
+    els.authMessage.textContent = humanAuthError(error);
   } finally {
     setBusy(false);
   }
 }
 
-async function authenticateWithBase44(profile, password, groupCode) {
-  const base44 = services.base44;
-
-  try {
-    await base44.auth.register({
-      email: profile.email,
-      password,
-      referral_code: null,
-      turnstile_token: null
-    });
-  } catch (error) {
-    if (requiresVerificationError(error)) {
-      showBase44VerificationStep(profile, password, groupCode);
-      throw new VerificationPendingError();
-    }
-    if (!alreadyExistsError(error)) throw error;
-    try {
-      await loginExistingBase44User(profile, password, groupCode);
-    } catch (loginError) {
-      if (requiresVerificationError(loginError)) {
-        showBase44VerificationStep(profile, password, groupCode);
-        throw new VerificationPendingError();
-      }
-      throw loginError;
-    }
-    return;
-  }
-
-  showBase44VerificationStep(profile, password, groupCode);
-  throw new VerificationPendingError();
-}
-
-function showBase44VerificationStep(profile, password, groupCode) {
-  pendingVerification = { profile, password, groupCode };
-  els.verificationPanel.hidden = false;
-  els.verificationPanel.classList.add("active");
-  els.authSubmitButton.textContent = "Verify and enter";
-  els.authMessage.textContent = "Check your email for the 6-digit code, then enter it here.";
-  requestAnimationFrame(() => {
-    els.verificationPanel.scrollIntoView({ block: "center", behavior: "smooth" });
-    els.authVerificationCode.focus({ preventScroll: true });
-  });
-}
-
-async function loginExistingBase44User(profile, password, groupCode) {
-  const base44 = services.base44;
-  const { user } = await base44.auth.loginViaEmailPassword(profile.email, password);
-  const photo = await uploadBase44Photo(pendingAuthFile, profile.photo);
-  const memberProfile = {
-    ...profile,
-    userId: user.id,
-    email: user.email || profile.email,
-    photo
-  };
-
-  await updateBase44UserProfile(memberProfile, groupCode);
-  await enterBase44Group(groupCode, memberProfile, { preserveExisting: true });
-}
-
-async function verifyBase44Code() {
-  const otpCode = els.authVerificationCode.value.trim();
-  if (!/^\d{6}$/.test(otpCode)) throw new Error("Enter the 6-digit verification code.");
-
-  const { profile, password, groupCode } = pendingVerification;
-  const result = await services.base44.auth.verifyOtp({
-    email: profile.email,
-    otpCode
-  });
-  const token = result?.access_token || result?.accessToken;
-  if (token && typeof services.base44.setToken === "function") {
-    services.base44.setToken(token);
-  }
-
-  await loginExistingBase44User(profile, password, groupCode);
-  els.authForm.reset();
-  pendingAuthPhoto = "";
-  pendingAuthFile = null;
-  clearVerificationStep();
-  if (groupMode === "create") els.authGroupCode.value = generateGroupCode();
-  renderAuthPhotoPreview("", "");
-  renderAuthGate();
-}
-
-async function authenticateWithFirebase(profile, password, groupCode) {
-  let credential;
-
-  try {
-    credential = await fb.createUserWithEmailAndPassword(services.auth, profile.email, password);
-  } catch (error) {
-    if (error.code !== "auth/email-already-in-use") throw error;
-    credential = await fb.signInWithEmailAndPassword(services.auth, profile.email, password);
-  }
-
-  profile.id = credential.user.uid;
-  await fb.updateProfile(credential.user, { displayName: profile.name });
-  await enterCloudGroup(groupCode, profile, { preserveExisting: true });
-}
-
-async function enterBase44Group(groupCode, profile, options = {}) {
-  const base44 = services.base44;
-  const CrewMember = base44.entities.CrewMember;
-  const account = await base44.auth.me();
-  const userId = profile.userId || account.id;
-
-  await updateBase44UserProfile({ ...profile, userId }, groupCode);
-
-  const matches = await CrewMember.filter({ userId, groupCode });
-  const existing = Array.isArray(matches) ? matches[0] : null;
+async function enterBase44GroupByName(groupCode, profile, pin) {
+  const CrewMember = services.base44.entities.CrewMember;
+  const records = await CrewMember.filter({ groupCode });
+  const friends = records.map((record) => normalizeMember(record));
+  const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  const secured = await securedMemberProfile(existing, profile, groupCode, pin);
   const memberData = sanitizeMember({
-    ...existing,
-    ...profile,
-    id: existing?.id || profile.id,
-    userId,
+    ...secured,
     groupCode,
-    name: profile.name || existing?.name || account.full_name || "You",
-    email: profile.email || existing?.email || account.email || "",
-    photo: profile.photo || existing?.photo || account.profilePhoto || "",
-    color: existing?.color || profile.color || account.pinColor || randomColor(),
-    schedule: options.preserveExisting ? existing?.schedule || profile.schedule || [] : profile.schedule || existing?.schedule || []
+    updatedAt: new Date().toISOString()
   });
 
   const saved = existing?.id
@@ -738,38 +596,15 @@ async function enterBase44Group(groupCode, profile, options = {}) {
 
   state.user = member;
   state.groupCode = groupCode;
+  state.friends = friends
+    .filter((friend) => friend.id !== member.id)
+    .concat(member)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   selectedFriendId = member.id;
+  localStore.session = { uid: member.id, groupCode };
+  saveLocalStore();
   localStorage.setItem(LAST_GROUP_KEY, groupCode);
   await subscribeToBase44Group(groupCode);
-}
-
-async function enterCloudGroup(groupCode, profile, options = {}) {
-  const memberRef = fb.doc(services.db, "groups", groupCode, "members", profile.id);
-  const memberSnap = await fb.getDoc(memberRef);
-  const existing = memberSnap.exists() ? memberSnap.data() : {};
-  const member = sanitizeMember({
-    ...existing,
-    ...profile,
-    groupCode,
-    name: profile.name || existing.name || "You",
-    email: profile.email || existing.email || "",
-    photo: profile.photo || existing.photo || "",
-    color: existing.color || profile.color || randomColor(),
-    schedule: options.preserveExisting ? existing.schedule || profile.schedule || [] : profile.schedule || existing.schedule || [],
-    updatedAt: fb.serverTimestamp()
-  });
-
-  await fb.setDoc(fb.doc(services.db, "groups", groupCode), {
-    code: groupCode,
-    updatedAt: fb.serverTimestamp()
-  }, { merge: true });
-  await fb.setDoc(memberRef, member, { merge: true });
-
-  state.user = { ...member, id: profile.id };
-  state.groupCode = groupCode;
-  selectedFriendId = state.user.id;
-  localStorage.setItem(LAST_GROUP_KEY, groupCode);
-  subscribeToGroup(groupCode);
 }
 
 async function subscribeToBase44Group(groupCode) {
@@ -802,48 +637,21 @@ async function refreshBase44Group(groupCode) {
   }
 }
 
-function subscribeToGroup(groupCode) {
-  if (services.unsubscribeGroup) services.unsubscribeGroup();
-
-  services.unsubscribeGroup = fb.onSnapshot(
-    fb.collection(services.db, "groups", groupCode, "members"),
-    (snapshot) => {
-      state.friends = snapshot.docs
-        .map((document) => normalizeMember({ id: document.id, ...document.data() }))
-        .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-
-      const current = state.friends.find((friend) => friend.id === state.user?.id);
-      if (current) state.user = current;
-      if (!selectedFriendId && state.user) selectedFriendId = state.user.id;
-      renderAuthGate();
-    },
-    (error) => {
-      els.authMessage.textContent = error.message || String(error);
-    }
-  );
-}
-
-function enterLocalGroup(profile, groupCode) {
-  const uid = localStore.session?.uid || cryptoId();
+async function enterLocalGroupByName(profile, groupCode, pin) {
   const group = localStore.groups[groupCode] || { code: groupCode, members: {} };
-  const existing = group.members[uid] || {};
-  const member = normalizeMember({
-    ...existing,
-    ...profile,
-    id: uid,
-    groupCode,
-    photo: profile.photo || existing.photo || "",
-    color: existing.color || profile.color || randomColor(),
-    schedule: existing.schedule || profile.schedule || []
-  });
+  const existing = Object.values(group.members || {})
+    .map(normalizeMember)
+    .find((friend) => sameName(friend.name, profile.name));
+  const secured = await securedMemberProfile(existing, profile, groupCode, pin);
+  const member = normalizeMember({ ...secured, groupCode });
 
-  group.members[uid] = member;
+  group.members[member.id] = member;
   localStore.groups[groupCode] = group;
-  localStore.session = { uid, groupCode };
+  localStore.session = { uid: member.id, groupCode };
   state.user = member;
   state.groupCode = groupCode;
   state.friends = friendsFromGroup(group);
-  selectedFriendId = uid;
+  selectedFriendId = member.id;
   saveLocalStore();
 }
 
@@ -859,16 +667,7 @@ async function persistCurrentMember(options = {}) {
     });
     const saved = await services.base44.entities.CrewMember.update(user.id, updated);
     state.user = normalizeMember(saved);
-    if (options.updateProfile !== false) {
-      await updateBase44UserProfile(state.user, state.groupCode);
-    }
     await refreshBase44Group(state.groupCode);
-  } else if (services.provider === "firebase") {
-    await fb.setDoc(fb.doc(services.db, "groups", state.groupCode, "members", user.id), sanitizeMember({
-      ...user,
-      groupCode: state.groupCode,
-      updatedAt: fb.serverTimestamp()
-    }), { merge: true });
   } else {
     const group = localStore.groups[state.groupCode] || { code: state.groupCode, members: {} };
     group.members[user.id] = normalizeMember(user);
@@ -881,7 +680,13 @@ async function persistCurrentMember(options = {}) {
 
 async function saveProfile() {
   const user = currentUser();
-  user.name = cleanName(els.profileName.value);
+  const nextName = cleanName(els.profileName.value);
+  const duplicate = state.friends.some((friend) => friend.id !== user.id && sameName(friend.name, nextName));
+  if (duplicate) {
+    els.profileMessage.textContent = "That name is already in this group. Pick another user name.";
+    return;
+  }
+  user.name = nextName;
   if (pendingProfilePhoto) {
     user.photo = services.provider === "base44"
       ? await uploadBase44Photo(pendingProfileFile, pendingProfilePhoto)
@@ -912,8 +717,6 @@ async function signOutUser() {
     } catch {
       localStorage.removeItem("base44_token");
     }
-  } else if (services.provider === "firebase" && services.auth.currentUser) {
-    await fb.signOut(services.auth);
   }
 
   localStore.session = null;
@@ -1092,7 +895,7 @@ function openProfileSheet() {
 
 function setBusy(isBusy) {
   els.authSubmitButton.disabled = isBusy;
-  els.authSubmitButton.textContent = isBusy ? "Opening the gate..." : (pendingVerification ? "Verify and enter" : "Enter app");
+  els.authSubmitButton.textContent = isBusy ? "Opening the gate..." : "Enter app";
 }
 
 function setGroupMode(mode) {
@@ -1116,33 +919,7 @@ function setGroupMode(mode) {
 }
 
 function clearVerificationStep() {
-  pendingVerification = null;
-  if (els.verificationPanel) els.verificationPanel.hidden = true;
-  if (els.verificationPanel) els.verificationPanel.classList.remove("active");
-  if (els.authVerificationCode) els.authVerificationCode.value = "";
   if (els.authSubmitButton) els.authSubmitButton.textContent = "Enter app";
-}
-
-async function resendVerificationCode() {
-  if (!pendingVerification) return;
-  setBusy(true);
-  try {
-    if (typeof services.base44.auth.resendOtp === "function") {
-      await services.base44.auth.resendOtp(pendingVerification.profile.email);
-    } else {
-      await services.base44.auth.register({
-        email: pendingVerification.profile.email,
-        password: pendingVerification.password,
-        referral_code: null,
-        turnstile_token: null
-      });
-    }
-    els.authMessage.textContent = "New verification code sent.";
-  } catch (error) {
-    els.authMessage.textContent = humanAuthError(error);
-  } finally {
-    setBusy(false);
-  }
 }
 
 function renderAuthGate() {
@@ -1153,8 +930,8 @@ function renderAuthGate() {
   if (!signedIn) {
     stopTimelineClock();
     els.cloudBadge.textContent = services.provider === "base44"
-      ? "Base44 secure sync"
-      : (services.cloud ? "Firebase secure sync" : "Local demo store");
+      ? "Group-code sync"
+      : "Local group store";
     return;
   }
 
@@ -1511,25 +1288,55 @@ function renderParsedSchedule() {
 }
 
 async function recognizeSchedule(file) {
+  await recognizeScheduleFiles([file]);
+}
+
+async function recognizeScheduleFiles(files) {
   parsedEvents = [];
   renderParsedSchedule();
-  els.ocrStatus.textContent = "Reading schedule picture...";
+  els.ocrText.value = "";
+  els.ocrStatus.textContent = files.length > 1
+    ? `Reading ${files.length} schedule pictures...`
+    : "Reading schedule picture...";
 
+  const results = [];
+  for (const [index, file] of files.entries()) {
+    els.ocrStatus.textContent = files.length > 1
+      ? `Reading picture ${index + 1} of ${files.length}...`
+      : "Reading schedule picture...";
+    results.push(await recognizeScheduleFile(file));
+  }
+
+  const events = dedupeScheduleEvents(results.flatMap((result) => result.events || []))
+    .sort((a, b) => {
+      if (a.day === b.day) return a.start - b.start;
+      return Object.keys(days).indexOf(a.day) - Object.keys(days).indexOf(b.day);
+    });
+  const text = results
+    .map((result, index) => result.text ? `Picture ${index + 1}\n${result.text}` : "")
+    .filter(Boolean)
+    .join("\n\n");
+
+  await acceptRecognizedSchedule({
+    source: results.map((result) => result.source).filter(Boolean).join(", ") || "OCR",
+    text,
+    events
+  }, files.length > 1 ? "Multi-upload" : results[0]?.source || "OCR");
+}
+
+async function recognizeScheduleFile(file) {
   const knownSchedule = await knownScheduleFromImage(file);
   if (knownSchedule) {
-    await acceptRecognizedSchedule(knownSchedule, "Matched your EDC screenshot");
-    return;
+    return knownSchedule;
   }
 
   if (!window.Tesseract) {
     els.ocrStatus.textContent = "OCR did not load. Asking Base44 to read the image...";
-    const aiResult = await extractScheduleWithBase44AI(file);
+    const aiResult = await extractScheduleWithBase44AI(file, "", dayFromFilename(file.name) || state.selectedDay);
     if (aiResult?.events?.length) {
-      await acceptRecognizedSchedule(aiResult, "Read by Base44");
-    } else {
-      els.ocrStatus.textContent = "Image reading is unavailable. Paste the visible schedule text here.";
+      return { ...aiResult, source: "Read by Base44" };
     }
-    return;
+    return { source: "Unavailable", text: "", events: [] };
   }
 
   try {
@@ -1555,8 +1362,8 @@ async function recognizeSchedule(file) {
         user_defined_dpi: "300"
       });
       const text = result?.data?.text || "";
-      const events = parseSchedule(text, els.scheduleDay.value);
-      if (events.length > best.events.length) best = { text, events };
+      const events = parseSchedule(text, dayIn(text) || dayFromFilename(file.name) || state.selectedDay);
+      if (events.length > best.events.length) best = { text, events, source: "OCR" };
       if (events.length >= 6) break;
     }
 
@@ -1566,13 +1373,22 @@ async function recognizeSchedule(file) {
     }
 
     if (best.events.length < 6) {
-      const aiResult = await extractScheduleWithBase44AI(file, best.text);
+      const aiResult = await extractScheduleWithBase44AI(file, best.text, dayFromFilename(file.name) || dayIn(best.text) || state.selectedDay);
       if (aiResult?.events?.length > best.events.length) best = aiResult;
     }
 
-    await acceptRecognizedSchedule(best, best.source || "OCR");
+    return {
+      source: best.source || "OCR",
+      text: best.text || "",
+      events: best.events || []
+    };
   } catch (error) {
-    els.ocrStatus.textContent = `OCR failed: ${error.message || error}`;
+    return {
+      source: "OCR failed",
+      text: "",
+      events: [],
+      error
+    };
   }
 }
 
@@ -1677,7 +1493,7 @@ function preprocessScheduleVariant(image, options) {
   return canvas;
 }
 
-async function extractScheduleWithBase44AI(file, ocrText = "") {
+async function extractScheduleWithBase44AI(file, ocrText = "", defaultDay = "friday") {
   if (services.provider !== "base44" || !services.base44?.integrations?.Core?.InvokeLLM) return null;
 
   try {
@@ -1725,7 +1541,7 @@ async function extractScheduleWithBase44AI(file, ocrText = "") {
       }
     });
 
-    const events = eventsFromAiSchedule(result);
+    const events = eventsFromAiSchedule(result, defaultDay);
     if (!events.length) return null;
     return {
       text: events.map((event) => (
@@ -1738,12 +1554,12 @@ async function extractScheduleWithBase44AI(file, ocrText = "") {
   }
 }
 
-function eventsFromAiSchedule(result) {
+function eventsFromAiSchedule(result, defaultDay = "friday") {
   const payload = aiPayload(result);
   const rows = Array.isArray(payload?.events) ? payload.events : [];
 
   return dedupeScheduleEvents(rows.map((row) => {
-    const day = dayIn(row.day || row.date || "") || "friday";
+    const day = dayIn(row.day || row.date || "") || defaultDay || "friday";
     const startText = row.start || row.startTime || row.startsAt || "";
     const endText = row.end || row.endTime || row.endsAt || "";
     const range = parseTimeRange(`${startText} to ${endText}`) || parseTimeRange(row.time || row.timeRange || "");
@@ -1814,14 +1630,15 @@ async function saveParsedScheduleToTimeline() {
   return true;
 }
 
-function parseSchedule(text, defaultDay) {
+function parseSchedule(text, defaultDay = "") {
   const normalizedText = normalizeScheduleText(text);
   const lines = normalizedText
     .split(/\n+/)
     .map(compactScheduleLine)
     .filter(Boolean);
 
-  let currentDay = dayIn(normalizedText) || defaultDay;
+  const fallbackDay = days[defaultDay] ? defaultDay : (dayIn(normalizedText) || state.selectedDay || "friday");
+  let currentDay = dayIn(normalizedText) || fallbackDay;
   const output = [];
   let lastArtist = "";
 
@@ -1855,8 +1672,10 @@ function parseSchedule(text, defaultDay) {
     lastArtist = "";
   });
 
-  const rangeEvents = parseScheduleByRanges(normalizedText, defaultDay);
-  return dedupeScheduleEvents(mergeScheduleEvents(output, rangeEvents)).sort((a, b) => {
+  const rangeEvents = parseScheduleByRanges(normalizedText, fallbackDay);
+  return dedupeScheduleEvents(mergeScheduleEvents(output, rangeEvents))
+    .filter((event) => days[event.day])
+    .sort((a, b) => {
     if (a.day === b.day) return a.start - b.start;
     return Object.keys(days).indexOf(a.day) - Object.keys(days).indexOf(b.day);
   });
@@ -2062,6 +1881,10 @@ function dayIn(text) {
   if (normalized.includes("saturday") || normalized.includes("sat ") || normalized.includes("may 16")) return "saturday";
   if (normalized.includes("friday") || normalized.includes("fri ") || normalized.includes("may 15")) return "friday";
   return "";
+}
+
+function dayFromFilename(filename) {
+  return dayIn(String(filename || "").replace(/[._-]/g, " "));
 }
 
 function stageIdIn(text) {
@@ -2312,6 +2135,8 @@ function currentUser() {
     email: "",
     photo: "",
     color: "#53e2ff",
+    pinHash: "",
+    pinSalt: "",
     schedule: [],
     liveLocation: null
   };
@@ -2334,6 +2159,34 @@ function avatarElement(friend, className) {
   return avatar;
 }
 
+async function securedMemberProfile(existing, profile, groupCode, pin) {
+  if (existing?.pinHash) {
+    const pinMatches = await verifyPin(pin, existing.pinHash, existing.pinSalt, groupCode);
+    if (!pinMatches) {
+      throw new Error("That name already exists in this group. Enter the correct PIN or choose another name.");
+    }
+  }
+
+  const pinSalt = existing?.pinSalt || pinSaltFromHash(existing?.pinHash) || createPinSalt();
+  const pinHash = existing?.pinHash || await hashPin(pin, pinSalt, groupCode);
+
+  return {
+    ...existing,
+    ...profile,
+    id: existing?.id || profile.id || groupNameUserId(groupCode, profile.name),
+    userId: existing?.userId || profile.userId || groupNameUserId(groupCode, profile.name),
+    groupCode,
+    name: profile.name,
+    email: "",
+    photo: profile.photo || existing?.photo || "",
+    color: existing?.color || profile.color || randomColor(),
+    pinHash,
+    pinSalt,
+    schedule: existing?.schedule || profile.schedule || [],
+    liveLocation: existing?.liveLocation || null
+  };
+}
+
 function normalizeMember(member) {
   return {
     id: member.id || cryptoId(),
@@ -2342,6 +2195,8 @@ function normalizeMember(member) {
     email: member.email || "",
     photo: member.photo || "",
     color: member.color || randomColor(),
+    pinHash: member.pinHash || "",
+    pinSalt: member.pinSalt || pinSaltFromHash(member.pinHash) || "",
     groupCode: member.groupCode || state.groupCode || "",
     schedule: Array.isArray(member.schedule) ? member.schedule.map(normalizeEvent).filter(Boolean) : [],
     liveLocation: normalizeLiveLocation(member.liveLocation)
@@ -2356,35 +2211,13 @@ function sanitizeMember(member) {
     email: normalized.email,
     photo: normalized.photo,
     color: normalized.color,
+    pinHash: normalized.pinHash,
+    pinSalt: normalized.pinSalt,
     groupCode: normalized.groupCode,
     schedule: normalized.schedule,
     liveLocation: normalized.liveLocation,
     updatedAt: member.updatedAt
   };
-}
-
-function profileFromBase44User(account, groupCode) {
-  return {
-    id: "",
-    userId: account.id || "",
-    name: cleanName(account.festivalName || account.full_name),
-    email: account.email || "",
-    photo: account.profilePhoto || "",
-    color: account.pinColor || randomColor(),
-    groupCode,
-    schedule: [],
-    liveLocation: null
-  };
-}
-
-async function updateBase44UserProfile(profile, groupCode) {
-  await services.base44.auth.updateMe({
-    full_name: cleanName(profile.name),
-    festivalName: cleanName(profile.name),
-    festivalGroupCode: groupCode,
-    profilePhoto: profile.photo || "",
-    pinColor: profile.color || randomColor()
-  });
 }
 
 async function uploadBase44Photo(file, fallbackDataUrl) {
@@ -2453,6 +2286,100 @@ function resetState() {
     friends: []
   };
   selectedFriendId = "";
+}
+
+async function openPhotoCropper(file, target) {
+  const image = await loadImage(file);
+  return new Promise((resolve) => {
+    cropState = {
+      file,
+      image,
+      target,
+      resolve
+    };
+    els.photoCropZoom.value = "1";
+    els.photoCropX.value = "0";
+    els.photoCropY.value = "0";
+    drawPhotoCropPreview();
+    openDialog(els.photoCropDialog);
+  });
+}
+
+function drawPhotoCropPreview() {
+  if (!cropState?.image) return;
+
+  const canvas = els.photoCropCanvas;
+  const context = canvas.getContext("2d");
+  const size = canvas.width;
+  const crop = cropRectangle(cropState.image);
+
+  context.clearRect(0, 0, size, size);
+  context.fillStyle = "#eef1f5";
+  context.fillRect(0, 0, size, size);
+
+  context.save();
+  context.beginPath();
+  context.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
+  context.clip();
+  context.drawImage(cropState.image, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size);
+  context.restore();
+
+  context.save();
+  context.fillStyle = "rgba(17, 17, 20, 0.18)";
+  context.fillRect(0, 0, size, size);
+  context.globalCompositeOperation = "destination-out";
+  context.beginPath();
+  context.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+
+  context.lineWidth = 4;
+  context.strokeStyle = "rgba(255, 255, 255, 0.94)";
+  context.beginPath();
+  context.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2);
+  context.stroke();
+}
+
+function cropRectangle(image) {
+  const zoom = Number(els.photoCropZoom.value) || 1;
+  const baseSize = Math.min(image.width, image.height) / zoom;
+  const maxX = Math.max(0, image.width - baseSize);
+  const maxY = Math.max(0, image.height - baseSize);
+  const offsetX = Number(els.photoCropX.value) || 0;
+  const offsetY = Number(els.photoCropY.value) || 0;
+
+  return {
+    x: clamp((maxX / 2) + offsetX * (maxX / 2), 0, maxX),
+    y: clamp((maxY / 2) + offsetY * (maxY / 2), 0, maxY),
+    size: baseSize
+  };
+}
+
+function croppedPhotoDataUrl() {
+  const output = document.createElement("canvas");
+  output.width = 720;
+  output.height = 720;
+  const context = output.getContext("2d");
+  const crop = cropRectangle(cropState.image);
+  context.drawImage(cropState.image, crop.x, crop.y, crop.size, crop.size, 0, 0, output.width, output.height);
+  return output.toDataURL("image/jpeg", 0.88);
+}
+
+function applyPhotoCrop() {
+  if (!cropState) return;
+  const dataUrl = croppedPhotoDataUrl();
+  const resolve = cropState.resolve;
+  cropState = null;
+  els.photoCropDialog.close();
+  resolve(dataUrl);
+}
+
+function cancelPhotoCrop() {
+  if (!cropState) return;
+  const resolve = cropState.resolve;
+  cropState = null;
+  els.photoCropDialog.close();
+  resolve("");
 }
 
 async function imageFileToDataUrl(file) {
@@ -2578,45 +2505,98 @@ function generateGroupCode() {
   return `EDC-${parts.slice(0, 3).join("")}-${parts.slice(3).join("")}`;
 }
 
-function validEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+function cleanPin(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 6);
 }
 
-async function emailOnlyPassword(email) {
-  const normalized = String(email || "").trim().toLowerCase();
-  const input = `${EMAIL_ONLY_SECRET}:${normalized}`;
+function validPin(pin) {
+  return /^\d{4,6}$/.test(cleanPin(pin));
+}
+
+function sameName(left, right) {
+  return nameKey(left) === nameKey(right);
+}
+
+function nameKey(name) {
+  return normalize(cleanName(name));
+}
+
+function groupNameUserId(groupCode, name) {
+  return `member-${normalizeGroupCode(groupCode).toLowerCase()}-${nameKey(name).slice(0, 64) || "you"}`;
+}
+
+function createPinSalt() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  if (bytes.some(Boolean)) return bytesToBase64Url(bytes);
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function pinSaltFromHash(pinHash) {
+  const parts = String(pinHash || "").split("$");
+  return parts[0] === "pbkdf2" || parts[0] === "simple" ? parts[2] || "" : "";
+}
+
+async function hashPin(pin, salt, groupCode) {
+  const clean = cleanPin(pin);
+  const input = `${clean}:${normalizeGroupCode(groupCode)}`;
 
   if (globalThis.crypto?.subtle) {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-    const bytes = [...new Uint8Array(digest)];
-    const token = btoa(String.fromCharCode(...bytes))
-      .replaceAll("+", "-")
-      .replaceAll("/", "_")
-      .replaceAll("=", "")
-      .slice(0, 32);
-    return `FG-${token}-2026!`;
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(input),
+      "PBKDF2",
+      false,
+      ["deriveBits"]
+    );
+    const iterations = 120000;
+    const bits = await crypto.subtle.deriveBits({
+      name: "PBKDF2",
+      salt: encoder.encode(`festival-gps-pin-v1:${salt}`),
+      iterations,
+      hash: "SHA-256"
+    }, key, 256);
+    return `pbkdf2$${iterations}$${salt}$${bytesToBase64Url(new Uint8Array(bits))}`;
   }
 
-  let hash = 0;
-  for (let index = 0; index < input.length; index += 1) {
-    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
+  return `simple$1$${salt}$${simpleHash(`festival-gps-pin-v1:${salt}:${input}`)}`;
+}
+
+async function verifyPin(pin, storedHash, storedSalt, groupCode) {
+  const salt = storedSalt || pinSaltFromHash(storedHash);
+  if (!salt || !storedHash) return false;
+  if (String(storedHash).startsWith("simple$")) {
+    return timingSafeEqual(`simple$1$${salt}$${simpleHash(`festival-gps-pin-v1:${salt}:${cleanPin(pin)}:${normalizeGroupCode(groupCode)}`)}`, storedHash);
   }
-  return `FG-${hash.toString(36)}-${normalized.length}-2026!`;
+  const expected = await hashPin(pin, salt, groupCode);
+  return timingSafeEqual(expected, storedHash);
 }
 
-function alreadyExistsError(error) {
-  const message = String(error?.message || error || "").toLowerCase();
-  return message.includes("already") || message.includes("exists") || message.includes("registered");
+function bytesToBase64Url(bytes) {
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
 }
 
-function requiresVerificationError(error) {
-  const message = String(error?.message || error?.data?.message || error?.data?.detail || error || "").toLowerCase();
-  return (
-    message.includes("verify") ||
-    message.includes("verification") ||
-    message.includes("otp") ||
-    (message.includes("code") && message.includes("email"))
-  );
+function timingSafeEqual(left, right) {
+  const a = String(left || "");
+  const b = String(right || "");
+  let diff = a.length ^ b.length;
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    diff |= (a.charCodeAt(index) || 0) ^ (b.charCodeAt(index) || 0);
+  }
+  return diff === 0;
+}
+
+function simpleHash(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function initials(name) {
@@ -2653,11 +2633,10 @@ function cryptoId() {
 
 function humanAuthError(error) {
   const code = error.code || "";
-  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "That email has an older account. Try another email for email-only entry.";
-  if (code.includes("weak-password")) return "Use a password with at least 6 characters.";
-  if (code.includes("invalid-email")) return "Enter a valid email address.";
+  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "That PIN does not match this name.";
+  if (code.includes("weak-password")) return "Use a 4-6 digit PIN.";
   if (code.includes("network")) return "Network issue. Try again when your connection is steady.";
-  if (String(error.message || "").toLowerCase().includes("unauthorized")) return "That email has an older account. Try another email for email-only entry.";
+  if (String(error.message || "").toLowerCase().includes("unauthorized")) return "That group or PIN could not be verified.";
   return error.message || String(error);
 }
 

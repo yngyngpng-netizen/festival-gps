@@ -205,6 +205,7 @@ label {
 
 .group-entry {
   display: grid;
+  grid-column: 1 / -1;
   gap: 7px;
   color: var(--muted);
   font-size: 12px;
@@ -1362,6 +1363,35 @@ dialog::backdrop {
 .friend-detail-card {
   grid-template-columns: 88px 1fr;
   align-items: center;
+}
+
+.crop-sheet {
+  gap: 16px;
+}
+
+.crop-preview {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: rgba(118, 118, 128, 0.10);
+}
+
+#photoCropCanvas {
+  width: min(320px, 100%);
+  aspect-ratio: 1;
+  border-radius: 24px;
+  box-shadow: 0 12px 28px rgba(31, 35, 45, 0.18);
+}
+
+.crop-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.crop-controls input[type="range"] {
+  width: 100%;
+  accent-color: var(--cyan);
 }
 
 .friend-list.compact {
