@@ -2483,33 +2483,42 @@ function renderExpandedFriendList() {
     return;
   }
 
-  els.expandedFriendList.replaceChildren();
-  const title = document.createElement("strong");
-  title.className = "expanded-friend-title";
-  title.textContent = "Crew grid";
-  els.expandedFriendList.append(title);
+  let title = els.expandedFriendList.querySelector(".expanded-friend-title");
+  if (!title) {
+    title = document.createElement("strong");
+    title.className = "expanded-friend-title";
+    title.textContent = "Crew grid";
+    els.expandedFriendList.append(title);
+  }
+
+  const activeIds = new Set(state.friends.map((friend) => friend.id));
+  [...els.expandedFriendList.querySelectorAll(".expanded-friend-row")].forEach((row) => {
+    if (!activeIds.has(row.dataset.friendId)) row.remove();
+  });
+  const existingRows = new Map([...els.expandedFriendList.querySelectorAll(".expanded-friend-row")]
+    .map((row) => [row.dataset.friendId, row]));
 
   state.friends.forEach((friend) => {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "expanded-friend-row";
+    let row = existingRows.get(friend.id);
+    if (!row) {
+      row = document.createElement("button");
+      row.type = "button";
+      row.className = "expanded-friend-row";
+      row.dataset.friendId = friend.id;
+      row.addEventListener("click", () => openFriendDetailById(row.dataset.friendId));
+      row.append(
+        avatarElement(friend, "expanded-avatar"),
+        gridBadgeElement(gridForFriend(friend), "expanded-grid-badge"),
+        Object.assign(document.createElement("span"), { className: "expanded-friend-name" })
+      );
+    }
+
+    row.dataset.friendId = friend.id;
     row.classList.toggle("active", friend.id === selectedFriendId);
     row.style.setProperty("--friend-color", friend.color || "#53e2ff");
-    row.addEventListener("click", () => {
-      selectedFriendId = friend.id;
-      renderAll();
-      renderFriendDetail(friend);
-      openDialog(els.friendDetailDialog);
-    });
-
-    const name = document.createElement("span");
-    name.className = "expanded-friend-name";
-    name.textContent = friend.name || "Friend";
-    row.append(
-      avatarElement(friend, "expanded-avatar"),
-      gridBadgeElement(gridForFriend(friend), "expanded-grid-badge"),
-      name
-    );
+    refreshAvatarElement(row.querySelector(".expanded-avatar"), friend);
+    row.querySelector(".expanded-grid-badge").textContent = gridForFriend(friend);
+    row.querySelector(".expanded-friend-name").textContent = friend.name || "Friend";
     els.expandedFriendList.append(row);
   });
 }
