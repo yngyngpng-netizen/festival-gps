@@ -37,6 +37,20 @@
       "type": "string",
       "maxLength": 16
     },
+    "isGroupOwner": {
+      "type": "boolean",
+      "default": false
+    },
+    "createdAt": {
+      "type": "string"
+    },
+    "removedAt": {
+      "type": "string"
+    },
+    "removedBy": {
+      "type": "string",
+      "maxLength": 120
+    },
     "schedule": {
       "type": "array",
       "default": [],

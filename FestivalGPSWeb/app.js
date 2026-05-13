@@ -185,6 +185,9 @@ let lastLocationProblem = "";
 let topFeedbackTimer = null;
 let cropState = null;
 let pendingInitialPosition = null;
+let selectedStageId = "";
+const artistImageCache = new Map();
+const artistImagePending = new Map();
 let mapkitState = {
   ready: false,
   loading: false,
@@ -269,7 +272,14 @@ function bindElements() {
     "friendDetailAvatar",
     "friendDetailNow",
     "friendDetailSource",
+    "friendDetailGrid",
     "friendDetailSchedule",
+    "stageDetailDialog",
+    "stageDetailName",
+    "stageDetailPhoto",
+    "stageDetailArtist",
+    "stageDetailTime",
+    "stageDetailSchedule",
     "photoCropDialog",
     "photoCropCanvas",
     "photoCropApply",
@@ -647,9 +657,17 @@ async function handleAuthSubmit(event) {
 async function enterBase44GroupByName(groupCode, profile, pin) {
   const CrewMember = services.base44.entities.CrewMember;
   const records = await CrewMember.filter({ groupCode });
-  const friends = records.map((record) => normalizeMember(record));
+  const allMembers = records.map((record) => normalizeMember(record));
+  const removedProfile = allMembers.find((friend) => sameName(friend.name, profile.name) && isRemovedMember(friend));
+  if (removedProfile) throw new Error("That profile was removed from this group. Use another user name or ask the group manager.");
+
+  const friends = activeMembers(allMembers);
   const existing = friends.find((friend) => sameName(friend.name, profile.name));
-  const secured = await securedMemberProfile(existing, profile, groupCode, pin);
+  const ownerExists = friends.some((friend) => friend.isGroupOwner);
+  const secured = await securedMemberProfile(existing, {
+    ...profile,
+    isGroupOwner: existing?.isGroupOwner || !ownerExists
+  }, groupCode, pin);
   const memberData = sanitizeMember({
     ...secured,
     groupCode,
@@ -689,8 +707,17 @@ async function subscribeToBase44Group(groupCode) {
 async function refreshBase44Group(groupCode) {
   try {
     const records = await services.base44.entities.CrewMember.filter({ groupCode });
-    state.friends = records
-      .map((record) => normalizeMember(record))
+    const allMembers = records.map((record) => normalizeMember(record));
+    const removedCurrent = allMembers.find((friend) => (
+      isRemovedMember(friend) &&
+      (friend.id === state.user?.id || (friend.userId && friend.userId === state.user?.userId))
+    ));
+    if (removedCurrent) {
+      await signOutUser({ message: "You were removed from that group. Ask the group manager if this was a mistake." });
+      return;
+    }
+
+    state.friends = activeMembers(allMembers)
       .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
     const current = state.friends.find((friend) => (
@@ -707,10 +734,17 @@ async function refreshBase44Group(groupCode) {
 
 async function enterLocalGroupByName(profile, groupCode, pin) {
   const group = localStore.groups[groupCode] || { code: groupCode, members: {} };
-  const existing = Object.values(group.members || {})
-    .map(normalizeMember)
-    .find((friend) => sameName(friend.name, profile.name));
-  const secured = await securedMemberProfile(existing, profile, groupCode, pin);
+  const allMembers = Object.values(group.members || {}).map(normalizeMember);
+  const removedProfile = allMembers.find((friend) => sameName(friend.name, profile.name) && isRemovedMember(friend));
+  if (removedProfile) throw new Error("That profile was removed from this group. Use another user name or ask the group manager.");
+
+  const friends = activeMembers(allMembers);
+  const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  const ownerExists = friends.some((friend) => friend.isGroupOwner);
+  const secured = await securedMemberProfile(existing, {
+    ...profile,
+    isGroupOwner: existing?.isGroupOwner || !ownerExists
+  }, groupCode, pin);
   const member = normalizeMember({ ...secured, groupCode });
 
   group.members[member.id] = member;
@@ -774,7 +808,47 @@ async function saveProfile() {
   }
 }
 
-async function signOutUser() {
+async function removeFriendFromGroup(friendId) {
+  if (!currentUserCanManageGroup()) {
+    els.profileMessage.textContent = "Only the group manager can remove people.";
+    return;
+  }
+
+  const target = state.friends.find((friend) => friend.id === friendId);
+  if (!target || target.id === state.user?.id) return;
+
+  const removedAt = new Date().toISOString();
+  try {
+    if (services.provider === "base44") {
+      await services.base44.entities.CrewMember.update(target.id, sanitizeMember({
+        ...target,
+        liveLocation: null,
+        removedAt,
+        removedBy: state.user.id,
+        updatedAt: removedAt
+      }));
+      await refreshBase44Group(state.groupCode);
+    } else {
+      const group = localStore.groups[state.groupCode] || { code: state.groupCode, members: {} };
+      group.members[target.id] = normalizeMember({
+        ...target,
+        liveLocation: null,
+        removedAt,
+        removedBy: state.user.id
+      });
+      localStore.groups[state.groupCode] = group;
+      state.friends = friendsFromGroup(group);
+      cacheCurrentGroup();
+      renderAll();
+    }
+
+    els.profileMessage.textContent = `${target.name || "Friend"} removed from this group.`;
+  } catch (error) {
+    els.profileMessage.textContent = error.message || String(error);
+  }
+}
+
+async function signOutUser(options = {}) {
   stopLiveLocation();
   stopTimelineClock();
   if (services.unsubscribeGroup) services.unsubscribeGroup();
@@ -796,7 +870,8 @@ async function signOutUser() {
   localStorage.removeItem(LAST_GROUP_KEY);
   resetState();
   renderAuthGate();
-  els.profileDialog.close();
+  if (options.message) els.authMessage.textContent = options.message;
+  if (els.profileDialog.open) els.profileDialog.close();
 }
 
 async function switchGroup() {
@@ -1055,10 +1130,12 @@ function openProfileSheet() {
   const user = currentUser();
   els.profileName.value = user.name || "";
   els.profileGroupCode.textContent = state.groupCode || "NO GROUP";
-  els.profileMessage.textContent = "";
+  els.profileMessage.textContent = currentUserCanManageGroup()
+    ? "Manager mode: remove stale people from your crew list."
+    : "";
   pendingProfilePhoto = "";
   renderProfilePreview(user);
-  renderFriendList(els.profileFriendList, { closeDialog: null });
+  renderFriendList(els.profileFriendList, { closeDialog: null, management: true });
   openDialog(els.profileDialog);
 }
 
@@ -1150,8 +1227,9 @@ function renderAll() {
   renderPins();
   renderFriendStrip();
   renderSelectedFriendSummary();
-  if (els.profileDialog.open) renderFriendList(els.profileFriendList, { closeDialog: null });
+  if (els.profileDialog.open) renderFriendList(els.profileFriendList, { closeDialog: null, management: true });
   if (els.friendDetailDialog.open) renderFriendDetail();
+  if (els.stageDetailDialog.open) renderStageDetail();
 }
 
 function handleMapClick(event) {
@@ -1269,12 +1347,20 @@ function renderStages() {
   stages.filter((stage) => stage.id !== "speedway-entry").forEach((stage) => {
     const position = screenPositionForStage(stage);
     const now = stageNowSummary(stage);
-    const marker = document.createElement("div");
+    const marker = document.createElement("button");
+    marker.type = "button";
     marker.className = "stage-marker";
     marker.style.left = `${position.x * 100}%`;
     marker.style.top = `${position.y * 100}%`;
     marker.style.setProperty("--stage-color", stage.color);
     marker.style.setProperty("--stage-art", stage.art);
+    marker.setAttribute("aria-label", now ? `${stage.name}, ${now.title}` : stage.name);
+    marker.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectedStageId = stage.id;
+      renderStageDetail(stage);
+      openDialog(els.stageDetailDialog);
+    });
 
     const photo = document.createElement("span");
     photo.className = "stage-photo";
@@ -1282,10 +1368,10 @@ function renderStages() {
       photo.classList.add("artist-active");
       photo.title = now.artist;
       photo.style.setProperty("--stage-art", artistGradient(now.artist, stage.color));
-      photo.textContent = initials(now.artist);
+      requestArtistImage(now.artist);
       const image = document.createElement("img");
       image.src = artistImageUrl(now.artist);
-      image.alt = "";
+      image.alt = now.artist;
       image.loading = "lazy";
       image.addEventListener("error", () => image.remove(), { once: true });
       photo.append(image);
@@ -1501,33 +1587,63 @@ function renderFriendStrip() {
 
 function renderFriendList(target = els.friendList, options = {}) {
   const closeDialog = options.closeDialog === undefined ? els.friendsDialog : options.closeDialog;
+  const management = Boolean(options.management);
+  const canManage = management && currentUserCanManageGroup();
   target.replaceChildren();
+  target.classList.toggle("manager-list", management);
 
   state.friends.forEach((friend) => {
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = document.createElement(canManage ? "div" : "button");
+    if (!canManage) row.type = "button";
     row.className = "friend-row";
+    row.classList.toggle("has-actions", canManage);
     row.classList.toggle("active", friend.id === selectedFriendId);
     row.style.setProperty("--friend-color", friend.color || "#53e2ff");
-    row.addEventListener("click", () => {
+
+    const openFriend = () => {
       selectedFriendId = friend.id;
       renderAll();
       renderFriendDetail(friend);
       if (closeDialog?.open) closeDialog.close();
       openDialog(els.friendDetailDialog);
-    });
+    };
 
     const copy = document.createElement("span");
     copy.className = "chip-copy";
     const name = document.createElement("span");
     name.className = "chip-name";
     name.textContent = friend.name || "Friend";
+    if (friend.isGroupOwner) {
+      const manager = document.createElement("span");
+      manager.className = "manager-pill";
+      manager.textContent = "Manager";
+      name.append(manager);
+    }
     const status = document.createElement("span");
     status.className = "chip-status";
     status.textContent = statusText(friend);
 
     copy.append(name, status);
-    row.append(avatarElement(friend, "mini-avatar"), copy);
+    if (canManage) {
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "friend-row-main";
+      openButton.addEventListener("click", openFriend);
+      openButton.append(avatarElement(friend, "mini-avatar"), copy);
+      row.append(openButton);
+
+      if (friend.id !== state.user?.id) {
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "remove-friend-button";
+        removeButton.textContent = "Remove";
+        removeButton.addEventListener("click", () => removeFriendFromGroup(friend.id));
+        row.append(removeButton);
+      }
+    } else {
+      row.addEventListener("click", openFriend);
+      row.append(avatarElement(friend, "mini-avatar"), copy);
+    }
     target.append(row);
   });
 }
@@ -1537,7 +1653,9 @@ function renderFriendDetail(friend = selectedFriend()) {
   els.friendDetailName.textContent = current.name || "Friend";
   renderAvatarInto(els.friendDetailAvatar, current);
   els.friendDetailNow.textContent = statusText(current);
-  els.friendDetailSource.textContent = `${locationSourceText(current)} · Grid ${gridForFriend(current)}`;
+  const currentGrid = gridForFriend(current);
+  els.friendDetailSource.textContent = locationSourceText(current);
+  els.friendDetailGrid.textContent = `GRID ${currentGrid}`;
   els.friendDetailSchedule.replaceChildren();
 
   const dayOrder = new Map(Object.keys(days).map((day, index) => [day, index]));
@@ -1581,6 +1699,87 @@ function renderFriendDetail(friend = selectedFriend()) {
     });
 
     els.friendDetailSchedule.append(section);
+  });
+}
+
+function renderStageDetail(stage = null) {
+  const currentStage = stage || stageById(selectedStageId);
+  if (!currentStage?.id || currentStage.id === "speedway-entry") return;
+
+  selectedStageId = currentStage.id;
+  const currentSet = officialEventForStage(currentStage.id);
+  const currentSummary = currentSet ? officialStageSummary(currentSet) : stageNowSummary(currentStage);
+  const artist = currentSummary?.artist || "";
+
+  els.stageDetailName.textContent = currentStage.name;
+  els.stageDetailPhoto.style.setProperty("--stage-art", artist ? artistGradient(artist, currentStage.color) : currentStage.art);
+  els.stageDetailPhoto.replaceChildren();
+  if (artist) {
+    requestArtistImage(artist);
+    const image = document.createElement("img");
+    image.src = artistImageUrl(artist);
+    image.alt = artist;
+    image.loading = "lazy";
+    image.addEventListener("error", () => image.remove(), { once: true });
+    els.stageDetailPhoto.append(image);
+  } else {
+    els.stageDetailPhoto.textContent = currentStage.short || "";
+  }
+
+  els.stageDetailArtist.textContent = artist || "No official set at this time";
+  els.stageDetailTime.textContent = currentSet
+    ? `${formatTime(currentSet.start)} to ${formatTime(currentSet.end)} on ${days[currentSet.day].label}`
+    : `${days[state.selectedDay].label} ${formatTime(state.selectedMinute)}`;
+  els.stageDetailSchedule.replaceChildren();
+
+  const sets = officialSetTimes()
+    .filter((item) => item.day === state.selectedDay && item.stageId === currentStage.id)
+    .sort((a, b) => a.start - b.start);
+
+  if (!sets.length) {
+    const empty = document.createElement("p");
+    empty.className = "friend-schedule-empty";
+    empty.textContent = "No official timeline loaded for this stage.";
+    els.stageDetailSchedule.append(empty);
+    return;
+  }
+
+  sets.forEach((item) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "stage-set-row";
+    row.classList.toggle("active", item.start <= state.selectedMinute && state.selectedMinute <= item.end);
+    row.addEventListener("click", () => {
+      state.selectedDay = item.day;
+      state.selectedMinute = item.start;
+      timelineFollowsClock = false;
+      currentLocationMode = false;
+      saveLocalStore();
+      renderAll();
+    });
+
+    const thumb = document.createElement("span");
+    thumb.className = "stage-set-thumb";
+    thumb.style.setProperty("--stage-art", artistGradient(item.artist, currentStage.color));
+    requestArtistImage(item.artist);
+    const image = document.createElement("img");
+    image.src = artistImageUrl(item.artist);
+    image.alt = item.artist;
+    image.loading = "lazy";
+    image.addEventListener("error", () => image.remove(), { once: true });
+    thumb.append(image);
+
+    const copy = document.createElement("span");
+    copy.className = "chip-copy";
+    const name = document.createElement("span");
+    name.className = "chip-name";
+    name.textContent = item.artist;
+    const meta = document.createElement("span");
+    meta.className = "chip-status";
+    meta.textContent = `${formatTime(item.start)} to ${formatTime(item.end)}`;
+    copy.append(name, meta);
+    row.append(thumb, copy);
+    els.stageDetailSchedule.append(row);
   });
 }
 
@@ -2668,6 +2867,10 @@ async function securedMemberProfile(existing, profile, groupCode, pin) {
     email: "",
     photo: profile.photo || existing?.photo || "",
     color: existing?.color || profile.color || randomColor(),
+    isGroupOwner: Boolean(existing?.isGroupOwner || profile.isGroupOwner),
+    createdAt: existing?.createdAt || profile.createdAt || new Date().toISOString(),
+    removedAt: "",
+    removedBy: "",
     pinHash,
     pinSalt,
     schedule: existing?.schedule || profile.schedule || [],
@@ -2683,6 +2886,10 @@ function normalizeMember(member) {
     email: member.email || "",
     photo: member.photo || "",
     color: member.color || randomColor(),
+    isGroupOwner: Boolean(member.isGroupOwner),
+    createdAt: member.createdAt || member.created_at || member.created_date || "",
+    removedAt: member.removedAt || "",
+    removedBy: member.removedBy || "",
     pinHash: member.pinHash || "",
     pinSalt: member.pinSalt || pinSaltFromHash(member.pinHash) || "",
     groupCode: member.groupCode || state.groupCode || "",
@@ -2699,6 +2906,10 @@ function sanitizeMember(member) {
     email: normalized.email,
     photo: normalized.photo,
     color: normalized.color,
+    isGroupOwner: normalized.isGroupOwner,
+    createdAt: normalized.createdAt,
+    removedAt: normalized.removedAt,
+    removedBy: normalized.removedBy,
     pinHash: normalized.pinHash,
     pinSalt: normalized.pinSalt,
     groupCode: normalized.groupCode,
@@ -2736,9 +2947,23 @@ function normalizeEvent(item) {
 }
 
 function friendsFromGroup(group) {
-  return Object.values(group.members || {})
-    .map(normalizeMember)
+  return activeMembers(Object.values(group.members || {}).map(normalizeMember))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}
+
+function activeMembers(members) {
+  return members.filter((member) => !isRemovedMember(member));
+}
+
+function isRemovedMember(member) {
+  return Boolean(member?.removedAt);
+}
+
+function currentUserCanManageGroup() {
+  const user = currentUser();
+  if (!user?.id) return false;
+  if (user.isGroupOwner) return true;
+  return !state.friends.some((friend) => friend.isGroupOwner && !isRemovedMember(friend));
 }
 
 function loadLocalStore() {
@@ -3301,8 +3526,91 @@ function artistGradient(name, fallbackColor = "#007aff") {
 }
 
 function artistImageUrl(name) {
-  const seed = encodeURIComponent(String(name || "EDC").replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim() || "EDC");
-  return `https://api.dicebear.com/9.x/initials/svg?seed=${seed}&radius=50&fontFamily=Inter&fontWeight=800&backgroundType=gradientLinear`;
+  return artistImageCache.get(artistImageKey(name)) || artistFallbackImageUrl(name);
+}
+
+function requestArtistImage(name) {
+  const key = artistImageKey(name);
+  if (!key || artistImageCache.has(key) || artistImagePending.has(key)) return;
+
+  const pending = loadDeezerArtistImage(name)
+    .then((url) => {
+      if (url) {
+        artistImageCache.set(key, url);
+        renderStages();
+        if (els.stageDetailDialog?.open) renderStageDetail();
+      }
+    })
+    .catch(() => {})
+    .finally(() => artistImagePending.delete(key));
+
+  artistImagePending.set(key, pending);
+}
+
+function loadDeezerArtistImage(name) {
+  return new Promise((resolve) => {
+    const search = primaryArtistName(name);
+    if (!search) {
+      resolve("");
+      return;
+    }
+
+    const callback = `__festivalArtistImage${Date.now()}${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      delete window[callback];
+      script.remove();
+    };
+    const timer = window.setTimeout(() => {
+      cleanup();
+      resolve("");
+    }, 4500);
+
+    window[callback] = (payload) => {
+      cleanup();
+      const match = bestDeezerArtistMatch(payload?.data || [], search);
+      resolve(match?.picture_big || match?.picture_medium || match?.picture || "");
+    };
+
+    script.onerror = () => {
+      cleanup();
+      resolve("");
+    };
+    script.src = `https://api.deezer.com/search/artist?q=${encodeURIComponent(search)}&output=jsonp&callback=${callback}`;
+    document.head.append(script);
+  });
+}
+
+function bestDeezerArtistMatch(artists, search) {
+  const searchKey = normalize(search);
+  const visible = artists.filter((artist) => (
+    artist?.picture_big &&
+    !String(artist.picture_big).includes("/artist//") &&
+    normalize(artist.name).includes(searchKey.slice(0, Math.max(4, Math.min(10, searchKey.length))))
+  ));
+  return visible.find((artist) => normalize(artist.name) === searchKey)
+    || visible.find((artist) => normalize(artist.name).startsWith(searchKey))
+    || visible[0]
+    || null;
+}
+
+function artistImageKey(name) {
+  return normalize(primaryArtistName(name));
+}
+
+function primaryArtistName(name) {
+  return String(name || "EDC")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(B2B|with|presents|ft\.?|feat\.?)\b.*$/i, " ")
+    .replace(/[^\p{L}\p{N}&\s.'-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function artistFallbackImageUrl(name) {
+  const seed = encodeURIComponent(primaryArtistName(name) || "EDC");
+  return `https://api.dicebear.com/9.x/personas/svg?seed=${seed}&radius=50&backgroundType=gradientLinear`;
 }
 
 function cryptoId() {

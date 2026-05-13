@@ -9,12 +9,12 @@
     <meta name="apple-mobile-web-app-title" content="Festival Buddy">
     <meta name="apple-itunes-app" content="app-id=561212119">
     <title>Festival Buddy</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260513-2">
+    <link rel="manifest" href="manifest.webmanifest?v=20260513-3">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260512-28">
-    <link rel="stylesheet" href="styles.css?v=20260513-2">
+    <link rel="stylesheet" href="styles.css?v=20260513-3">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260513-2"></script>
+    <script type="module" src="app.js?v=20260513-3"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Join Festival Buddy group">
@@ -244,9 +244,33 @@
             <span class="eyebrow">Right now</span>
             <strong id="friendDetailNow">Schedule fallback</strong>
             <small id="friendDetailSource">No live GPS</small>
+            <span id="friendDetailGrid" class="detail-grid-badge">GRID --</span>
           </div>
         </div>
         <div id="friendDetailSchedule" class="parsed-list"></div>
+      </form>
+    </dialog>
+
+    <dialog id="stageDetailDialog">
+      <form method="dialog" class="sheet tall">
+        <header class="sheet-header">
+          <div>
+            <span class="eyebrow">Stage timeline</span>
+            <h2 id="stageDetailName">Stage</h2>
+          </div>
+          <button class="icon-button ghost" value="cancel" type="submit" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 12.6 12.6-1.4 1.4L5 6.4 6.4 5Zm12.6 1.4L6.4 19 5 17.6 17.6 5 19 6.4Z"/></svg>
+          </button>
+        </header>
+        <div class="stage-detail-card">
+          <div id="stageDetailPhoto" class="stage-detail-photo"></div>
+          <div>
+            <span class="eyebrow">Playing now</span>
+            <strong id="stageDetailArtist">Artist</strong>
+            <small id="stageDetailTime">Timeline</small>
+          </div>
+        </div>
+        <div id="stageDetailSchedule" class="stage-set-list"></div>
       </form>
     </dialog>
 
