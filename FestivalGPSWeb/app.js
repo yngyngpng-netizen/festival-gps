@@ -126,6 +126,7 @@ let timelineFollowsClock = true;
 let lastLocationProblem = "";
 let topFeedbackTimer = null;
 let cropState = null;
+let pendingInitialPosition = null;
 let mapkitState = {
   ready: false,
   loading: false,
@@ -335,7 +336,13 @@ function bindEvents() {
 
   els.applyScheduleButton.addEventListener("click", applySchedule);
 
-  window.addEventListener("online", renderAll);
+  window.addEventListener("online", () => {
+    if (state.user?.id && localStore.shareLocation && !locationSharing) {
+      startLiveLocation({ quiet: true });
+    }
+    syncPendingLiveLocation();
+    renderAll();
+  });
   window.addEventListener("offline", renderAll);
   window.addEventListener("resize", syncMapOverlays);
 }
@@ -557,6 +564,7 @@ async function handleAuthSubmit(event) {
     if (!rawName) throw new Error("Enter your user name.");
     if (!validPin(pin)) throw new Error("Create a 4-6 digit PIN.");
     if (!groupCode) throw new Error("Enter a group code.");
+    requestLocationPermissionOnEntry();
 
     if (services.provider === "base44") {
       await enterBase44GroupByName(groupCode, profile, pin);
@@ -567,6 +575,8 @@ async function handleAuthSubmit(event) {
     els.authForm.reset();
     pendingAuthPhoto = "";
     pendingAuthFile = null;
+    localStore.shareLocation = true;
+    saveLocalStore();
     if (groupMode === "create") els.authGroupCode.value = generateGroupCode();
     renderAuthPhotoPreview("", "");
     renderAuthGate();
@@ -602,7 +612,7 @@ async function enterBase44GroupByName(groupCode, profile, pin) {
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   selectedFriendId = member.id;
   localStore.session = { uid: member.id, groupCode };
-  saveLocalStore();
+  cacheCurrentGroup();
   localStorage.setItem(LAST_GROUP_KEY, groupCode);
   await subscribeToBase44Group(groupCode);
 }
@@ -631,6 +641,7 @@ async function refreshBase44Group(groupCode) {
     ));
     if (current) state.user = current;
     if (!selectedFriendId && state.user) selectedFriendId = state.user.id;
+    cacheCurrentGroup();
     renderAuthGate();
   } catch (error) {
     els.authMessage.textContent = error.message || String(error);
@@ -652,7 +663,7 @@ async function enterLocalGroupByName(profile, groupCode, pin) {
   state.groupCode = groupCode;
   state.friends = friendsFromGroup(group);
   selectedFriendId = member.id;
-  saveLocalStore();
+  cacheCurrentGroup();
 }
 
 async function persistCurrentMember(options = {}) {
@@ -676,6 +687,7 @@ async function persistCurrentMember(options = {}) {
     state.friends = friendsFromGroup(group);
     saveLocalStore();
   }
+  cacheCurrentGroup();
 }
 
 async function saveProfile() {
@@ -765,6 +777,29 @@ function startLiveLocation(options = {}) {
   renderAll();
 }
 
+function requestLocationPermissionOnEntry() {
+  if (!navigator.geolocation) {
+    lastLocationProblem = "GPS unavailable, using schedule";
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      pendingInitialPosition = position;
+      if (state.user?.id) {
+        pendingInitialPosition = null;
+        handleLivePosition(position);
+      }
+    },
+    (error) => handleLiveLocationError(error, { quiet: true }),
+    {
+      enableHighAccuracy: true,
+      maximumAge: 30 * 1000,
+      timeout: 20 * 1000
+    }
+  );
+}
+
 function stopLiveLocation(options = {}) {
   if (locationWatchId !== null) {
     navigator.geolocation.clearWatch(locationWatchId);
@@ -772,7 +807,7 @@ function stopLiveLocation(options = {}) {
   locationWatchId = null;
   locationSharing = false;
   if (!options.keepProblem) lastLocationProblem = "";
-  localStore.shareLocation = false;
+  if (!options.preserveShare) localStore.shareLocation = false;
   saveLocalStore();
 }
 
@@ -803,6 +838,10 @@ async function handleLivePosition(position) {
   lastLocationProblem = "";
   user.liveLocation = liveLocation;
   state.user = user;
+  const friend = state.friends.find((item) => item.id === user.id);
+  if (friend) friend.liveLocation = liveLocation;
+  localStore.pendingLiveLocation = liveLocation;
+  cacheCurrentGroup();
   renderAll();
 
   const now = Date.now();
@@ -811,6 +850,8 @@ async function handleLivePosition(position) {
 
   try {
     await persistCurrentMember({ updateProfile: false });
+    localStore.pendingLiveLocation = null;
+    cacheCurrentGroup();
   } catch {
     localStore.pendingLiveLocation = liveLocation;
     saveLocalStore();
@@ -818,14 +859,17 @@ async function handleLivePosition(position) {
 }
 
 async function handleLiveLocationError(error, options = {}) {
-  lastLocationProblem = error?.code === error?.PERMISSION_DENIED
+  const denied = error?.code === error?.PERMISSION_DENIED;
+  lastLocationProblem = denied
     ? "Location permission off, using schedule"
-    : "GPS unavailable, using schedule";
-  await clearOwnLiveLocation({ persist: true });
+    : "GPS unavailable, using last seen or schedule";
+  if (denied) {
+    await clearOwnLiveLocation({ persist: true });
+  }
   if (!options.quiet) {
     renderAll();
   }
-  stopLiveLocation({ keepProblem: true });
+  stopLiveLocation({ keepProblem: true, preserveShare: !denied });
   renderAll();
 }
 
@@ -844,8 +888,25 @@ async function clearOwnLiveLocation(options = {}) {
 
   try {
     await persistCurrentMember({ updateProfile: false });
+    localStore.pendingLiveLocation = null;
+    cacheCurrentGroup();
   } catch {
     localStore.pendingLiveLocation = null;
+    saveLocalStore();
+  }
+}
+
+async function syncPendingLiveLocation() {
+  if (!state.user?.id || !state.groupCode || !localStore.pendingLiveLocation) return;
+  const user = currentUser();
+  user.liveLocation = localStore.pendingLiveLocation;
+  state.user = user;
+
+  try {
+    await persistCurrentMember({ updateProfile: false });
+    localStore.pendingLiveLocation = null;
+    cacheCurrentGroup();
+  } catch {
     saveLocalStore();
   }
 }
@@ -942,6 +1003,11 @@ function renderAuthGate() {
     : state.user.id;
   if (localStore.shareLocation && !locationSharing) {
     startLiveLocation({ quiet: true });
+  }
+  if (pendingInitialPosition) {
+    const position = pendingInitialPosition;
+    pendingInitialPosition = null;
+    handleLivePosition(position);
   }
   renderAll();
 }
@@ -1928,8 +1994,8 @@ function cleanArtist(value) {
 }
 
 function stageForFriend(friend) {
-  const live = liveLocationForFriend(friend);
-  if (live?.stageId) return stageById(live.stageId);
+  const mapped = mappedLocationForFriend(friend);
+  if (mapped?.stageId) return stageById(mapped.stageId);
 
   const active = activeEvent(friend);
   if (active) return stageById(active.stageId);
@@ -1957,6 +2023,9 @@ function statusText(friend) {
   const live = liveLocationForFriend(friend);
   if (live) return `Live GPS: ${stageById(live.stageId).name}`;
 
+  const lastKnown = lastKnownLocationForFriend(friend);
+  if (lastKnown) return `Last seen: ${stageById(lastKnown.stageId).name}`;
+
   const active = activeEvent(friend);
   if (active) return `Now: ${active.artist}, ${stageById(active.stageId).name}`;
 
@@ -1971,10 +2040,11 @@ function statusText(friend) {
 
 function locationSourceText(friend) {
   const live = liveLocationForFriend(friend);
+  const lastKnown = lastKnownLocationForFriend(friend);
   const selectedIsSelf = friend.id === state.user?.id;
 
   if (live) return `${selectedIsSelf ? "Your" : "Friend"} live GPS ${relativeAge(live.updatedAt)}`;
-  if (!navigator.onLine) return "Offline, using schedule";
+  if (lastKnown) return `${navigator.onLine ? "Last GPS" : "Offline last seen"} ${relativeAge(lastKnown.updatedAt)}`;
   if (selectedIsSelf && lastLocationProblem) return lastLocationProblem;
   if (selectedIsSelf && locationSharing) return "Waiting for GPS, using schedule";
   return "Schedule fallback";
@@ -2004,9 +2074,9 @@ function offsetPosition(friend, stage, groups) {
 }
 
 function positionForFriend(friend, stage, groups) {
-  const live = liveLocationForFriend(friend);
-  if (live) {
-    return clampMapPosition(screenPositionForLiveLocation(live));
+  const mapped = mappedLocationForFriend(friend);
+  if (mapped) {
+    return clampMapPosition(screenPositionForLiveLocation(mapped));
   }
 
   return clampMapPosition(offsetPosition(friend, stage, groups));
@@ -2061,6 +2131,16 @@ function liveLocationForFriend(friend) {
   const updatedAt = Date.parse(live.updatedAt);
   if (!Number.isFinite(updatedAt)) return null;
   if (Date.now() - updatedAt > LIVE_LOCATION_MAX_AGE_MS) return null;
+  return live;
+}
+
+function mappedLocationForFriend(friend) {
+  return liveLocationForFriend(friend) || lastKnownLocationForFriend(friend);
+}
+
+function lastKnownLocationForFriend(friend) {
+  const live = normalizeLiveLocation(friend?.liveLocation);
+  if (!live?.insideFestival) return null;
   return live;
 }
 
@@ -2275,6 +2355,23 @@ function saveLocalStore() {
   localStore.selectedDay = state.selectedDay;
   localStore.selectedMinute = state.selectedMinute;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(localStore));
+}
+
+function cacheCurrentGroup() {
+  if (!state.groupCode || !state.user?.id) {
+    saveLocalStore();
+    return;
+  }
+
+  const members = new Map();
+  state.friends.forEach((friend) => members.set(friend.id, normalizeMember(friend)));
+  members.set(state.user.id, normalizeMember(state.user));
+  localStore.groups[state.groupCode] = {
+    code: state.groupCode,
+    members: Object.fromEntries(members)
+  };
+  localStore.session = { uid: state.user.id, groupCode: state.groupCode };
+  saveLocalStore();
 }
 
 function resetState() {
