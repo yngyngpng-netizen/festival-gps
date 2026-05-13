@@ -6,6 +6,7 @@ const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
+const PIN_BUCKET_THRESHOLD = 3;
 const EDC_GEO_MARGIN = 0.0015;
 const MAP_PIN_BOUNDS = {
   minX: 0.045,
@@ -186,6 +187,7 @@ let topFeedbackTimer = null;
 let cropState = null;
 let pendingInitialPosition = null;
 let selectedStageId = "";
+let selectedBucketId = "";
 const artistImageCache = new Map();
 const artistImagePending = new Map();
 let mapkitState = {
@@ -264,7 +266,6 @@ function bindElements() {
     "copyGroupButton",
     "saveProfileButton",
     "switchGroupButton",
-    "signOutButton",
     "profileMessage",
     "profileFriendList",
     "friendDetailDialog",
@@ -274,6 +275,10 @@ function bindElements() {
     "friendDetailSource",
     "friendDetailGrid",
     "friendDetailSchedule",
+    "bucketDialog",
+    "bucketTitle",
+    "bucketSubtitle",
+    "bucketList",
     "stageDetailDialog",
     "stageDetailName",
     "stageDetailPhoto",
@@ -380,7 +385,6 @@ function bindEvents() {
   });
 
   els.saveProfileButton.addEventListener("click", saveProfile);
-  els.signOutButton.addEventListener("click", signOutUser);
   els.switchGroupButton.addEventListener("click", switchGroup);
   els.copyGroupButton.addEventListener("click", copyGroupCode);
   els.copyGroupFromFriendsButton.addEventListener("click", copyGroupCode);
@@ -1224,16 +1228,18 @@ function renderAll() {
   });
 
   renderRoutes();
+  renderStages();
   renderPins();
   renderFriendStrip();
   renderSelectedFriendSummary();
   if (els.profileDialog.open) renderFriendList(els.profileFriendList, { closeDialog: null, management: true });
   if (els.friendDetailDialog.open) renderFriendDetail();
+  if (els.bucketDialog.open) renderBucketDetail();
   if (els.stageDetailDialog.open) renderStageDetail();
 }
 
 function handleMapClick(event) {
-  if (event.target.closest(".friend-pin, .map-expand-button, .map-close-button")) return;
+  if (event.target.closest(".friend-pin, .bucket-pin, .stage-marker, .map-expand-button, .map-close-button")) return;
   if (!els.map.classList.contains("expanded")) {
     setMapExpanded(true);
   }
@@ -1485,17 +1491,20 @@ function renderRoutes() {
 }
 
 function renderPins() {
-  const placements = stagePlacements();
+  const layout = pinLayout();
   const nextPositions = new Map();
-  const activeIds = new Set(state.friends.map((friend) => friend.id));
+  const activeIds = new Set(layout.singles.map(({ friend }) => friend.id));
+  const activeBucketIds = new Set(layout.buckets.map((bucket) => bucket.id));
 
   [...els.pinLayer.querySelectorAll(".friend-pin")].forEach((pin) => {
     if (!activeIds.has(pin.dataset.friendId)) pin.remove();
   });
 
-  state.friends.forEach((friend) => {
-    const stage = stageForFriend(friend);
-    const position = positionForFriend(friend, stage, placements);
+  [...els.pinLayer.querySelectorAll(".bucket-pin")].forEach((bucket) => {
+    if (!activeBucketIds.has(bucket.dataset.bucketId)) bucket.remove();
+  });
+
+  layout.singles.forEach(({ friend, position, grid }) => {
     const previous = lastPinPositions.get(friend.id);
     const isMoving = Boolean(previous && Math.hypot(previous.x - position.x, previous.y - position.y) > 0.01);
     let pin = els.pinLayer.querySelector(`[data-friend-id="${cssEscape(friend.id)}"]`);
@@ -1517,21 +1526,28 @@ function renderPins() {
     }
 
     pin.classList.toggle("selected", friend.id === selectedFriendId);
-    const friendGrid = gridForFriend(friend, position);
+    const friendGrid = grid || gridForFriend(friend, position);
     pin.classList.toggle("live", currentLocationMode && Boolean(liveLocationForFriend(friend)));
     pin.style.setProperty("--friend-color", friend.color || "#53e2ff");
     pin.setAttribute("aria-label", `${friend.name}, ${statusText(friend)}, grid ${friendGrid}`);
     pin.dataset.grid = friendGrid;
-    pin.replaceChildren();
 
-    const name = document.createElement("span");
-    name.className = "pin-name";
+    let name = pin.querySelector(".pin-name");
+    let avatar = pin.querySelector(".pin-head");
+    let gridBadge = pin.querySelector(".pin-grid");
+    if (!name || !avatar || !gridBadge) {
+      pin.replaceChildren();
+      name = document.createElement("span");
+      name.className = "pin-name";
+      avatar = avatarElement(friend, "pin-head");
+      gridBadge = document.createElement("span");
+      gridBadge.className = "pin-grid";
+      pin.append(name, avatar, gridBadge);
+    }
+
     name.textContent = friend.name || "Friend";
-    const gridBadge = document.createElement("span");
-    gridBadge.className = "pin-grid";
     gridBadge.textContent = friendGrid;
-
-    pin.append(name, avatarElement(friend, "pin-head"), gridBadge);
+    refreshAvatarElement(avatar, friend);
 
     if (isNew) {
       pin.style.left = `${position.x * 100}%`;
@@ -1549,6 +1565,83 @@ function renderPins() {
     }
 
     nextPositions.set(friend.id, position);
+  });
+
+  layout.buckets.forEach((bucket) => {
+    const key = `bucket:${bucket.id}`;
+    const previous = lastPinPositions.get(key);
+    const isMoving = Boolean(previous && Math.hypot(previous.x - bucket.position.x, previous.y - bucket.position.y) > 0.01);
+    let pin = els.pinLayer.querySelector(`[data-bucket-id="${cssEscape(bucket.id)}"]`);
+    const isNew = !pin;
+
+    if (!pin) {
+      pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "bucket-pin";
+      pin.dataset.bucketId = bucket.id;
+      pin.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const currentBucket = pin._bucketData || bucket;
+        selectedBucketId = currentBucket.id;
+        renderBucketDetail(currentBucket);
+        openDialog(els.bucketDialog);
+      });
+      els.pinLayer.append(pin);
+    }
+
+    pin._bucketData = bucket;
+    pin.classList.toggle("selected", bucket.friends.some((friend) => friend.id === selectedFriendId));
+    pin.style.setProperty("--bucket-color", bucket.friends[0]?.color || "#53e2ff");
+    pin.setAttribute("aria-label", `${bucket.friends.length} friends at ${bucket.label}, grid ${bucket.grid}`);
+    pin.dataset.grid = bucket.grid;
+
+    let name = pin.querySelector(".bucket-name");
+    let stack = pin.querySelector(".bucket-stack");
+    let count = pin.querySelector(".bucket-count");
+    let smallOne = pin.querySelector(".bucket-small.one");
+    let smallTwo = pin.querySelector(".bucket-small.two");
+    let gridBadge = pin.querySelector(".pin-grid");
+    if (!name || !stack || !count || !smallOne || !smallTwo || !gridBadge) {
+      pin.replaceChildren();
+      name = document.createElement("span");
+      name.className = "bucket-name";
+      stack = document.createElement("span");
+      stack.className = "bucket-stack";
+      count = document.createElement("span");
+      count.className = "bucket-count";
+      smallOne = document.createElement("span");
+      smallOne.className = "bucket-small one";
+      smallTwo = document.createElement("span");
+      smallTwo.className = "bucket-small two";
+      gridBadge = document.createElement("span");
+      gridBadge.className = "pin-grid";
+      stack.append(count, smallOne, smallTwo);
+      pin.append(name, stack, gridBadge);
+    }
+
+    const previewFriends = bucket.friends.slice(0, 2);
+    name.textContent = `${bucket.friends.length} friends`;
+    count.textContent = bucket.friends.length;
+    gridBadge.textContent = bucket.grid;
+    refreshAvatarElement(smallOne, previewFriends[0] || bucket.friends[0]);
+    refreshAvatarElement(smallTwo, previewFriends[1] || bucket.friends[0]);
+
+    if (isNew) {
+      pin.style.left = `${bucket.position.x * 100}%`;
+      pin.style.top = `${bucket.position.y * 100}%`;
+    } else {
+      pin.classList.toggle("walking", isMoving);
+      if (isMoving) {
+        window.clearTimeout(pin._walkTimer);
+        pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
+      }
+      requestAnimationFrame(() => {
+        pin.style.left = `${bucket.position.x * 100}%`;
+        pin.style.top = `${bucket.position.y * 100}%`;
+      });
+    }
+
+    nextPositions.set(key, bucket.position);
   });
 
   lastPinPositions = nextPositions;
@@ -1645,6 +1738,50 @@ function renderFriendList(target = els.friendList, options = {}) {
       row.append(avatarElement(friend, "mini-avatar"), copy);
     }
     target.append(row);
+  });
+}
+
+function renderBucketDetail(bucket = null) {
+  const currentBucket = bucket || pinLayout().buckets.find((item) => item.id === selectedBucketId);
+  if (!currentBucket) {
+    if (els.bucketDialog.open) els.bucketDialog.close();
+    return;
+  }
+
+  selectedBucketId = currentBucket.id;
+  els.bucketTitle.textContent = `${currentBucket.friends.length} friends here`;
+  els.bucketSubtitle.textContent = `${currentBucket.label} - GRID ${currentBucket.grid}`;
+  els.bucketList.replaceChildren();
+
+  currentBucket.friends.forEach((friend) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "friend-row bucket-row";
+    row.classList.toggle("active", friend.id === selectedFriendId);
+    row.style.setProperty("--friend-color", friend.color || "#53e2ff");
+    row.addEventListener("click", () => {
+      selectedFriendId = friend.id;
+      if (els.bucketDialog.open) els.bucketDialog.close();
+      renderAll();
+      renderFriendDetail(friend);
+      openDialog(els.friendDetailDialog);
+    });
+
+    const copy = document.createElement("span");
+    copy.className = "chip-copy";
+    const name = document.createElement("span");
+    name.className = "chip-name";
+    name.textContent = friend.name || "Friend";
+    const status = document.createElement("span");
+    status.className = "chip-status";
+    status.textContent = statusText(friend);
+    const grid = document.createElement("span");
+    grid.className = "bucket-row-grid";
+    grid.textContent = gridForFriend(friend);
+
+    copy.append(name, status);
+    row.append(avatarElement(friend, "mini-avatar"), copy, grid);
+    els.bucketList.append(row);
   });
 }
 
@@ -2566,6 +2703,91 @@ function locationSourceText(friend) {
   return "Timeline";
 }
 
+function pinLayout() {
+  const groups = new Map();
+
+  state.friends.forEach((friend) => {
+    const stage = stageForFriend(friend);
+    const basePosition = basePositionForFriend(friend, stage);
+    const grid = gridForPosition(basePosition);
+    const id = currentLocationMode ? `${stage.id}-${grid}` : stage.id;
+    const existing = groups.get(id) || {
+      id,
+      stage,
+      label: stage.name,
+      friends: [],
+      positions: []
+    };
+
+    existing.friends.push(friend);
+    existing.positions.push(basePosition);
+    groups.set(id, existing);
+  });
+
+  const singles = [];
+  const buckets = [];
+
+  groups.forEach((group) => {
+    const center = averagePosition(group.positions);
+    const centerGrid = gridForPosition(center);
+
+    if (group.friends.length >= PIN_BUCKET_THRESHOLD) {
+      buckets.push({
+        id: group.id,
+        stageId: group.stage.id,
+        label: group.label,
+        friends: group.friends,
+        position: center,
+        grid: centerGrid
+      });
+      return;
+    }
+
+    group.friends.forEach((friend, index) => {
+      const position = offsetAroundPosition(group.positions[index] || center, index, group.friends.length);
+      singles.push({
+        friend,
+        stage: group.stage,
+        position,
+        grid: gridForPosition(position)
+      });
+    });
+  });
+
+  return { singles, buckets };
+}
+
+function basePositionForFriend(friend, stage) {
+  if (currentLocationMode) {
+    const mapped = locationOverrideForFriend(friend);
+    if (mapped) return clampMapPosition(screenPositionForLiveLocation(mapped));
+  }
+
+  return screenPositionForStage(stage);
+}
+
+function averagePosition(positions) {
+  if (!positions.length) return screenPositionForStage(stageById("speedway-entry"));
+  const total = positions.reduce((sum, position) => ({
+    x: sum.x + position.x,
+    y: sum.y + position.y
+  }), { x: 0, y: 0 });
+  return clampMapPosition({
+    x: total.x / positions.length,
+    y: total.y / positions.length
+  });
+}
+
+function offsetAroundPosition(position, index, count) {
+  if (count <= 1) return clampMapPosition(position);
+  const angle = (index / count) * Math.PI * 2 - Math.PI / 2;
+  const radius = count === 2 ? 0.026 : 0.036;
+  return clampMapPosition({
+    x: position.x + Math.cos(angle) * radius,
+    y: position.y + Math.sin(angle) * radius
+  });
+}
+
 function stagePlacements() {
   const groups = new Map();
   state.friends.forEach((friend) => {
@@ -2601,7 +2823,7 @@ function positionForFriend(friend, stage, groups) {
 }
 
 function gridForFriend(friend, knownPosition = null) {
-  const position = knownPosition || positionForFriend(friend, stageForFriend(friend), stagePlacements());
+  const position = knownPosition || basePositionForFriend(friend, stageForFriend(friend));
   return gridForPosition(position);
 }
 
@@ -2832,18 +3054,29 @@ function avatarElement(friend, className) {
   const avatar = document.createElement("span");
   const displayFriend = friendWithDisplayName(friend);
   avatar.className = className;
-  avatar.style.setProperty("--friend-color", displayFriend.color || "#53e2ff");
+  refreshAvatarElement(avatar, displayFriend);
+  return avatar;
+}
 
-  if (displayFriend.photo) {
+function refreshAvatarElement(avatar, friend) {
+  const displayFriend = friendWithDisplayName(friend);
+  avatar.style.setProperty("--friend-color", displayFriend.color || "#53e2ff");
+  const nextPhoto = displayFriend.photo || "";
+  const nextInitials = initials(displayFriend.name);
+  if (avatar.dataset.photo === nextPhoto && avatar.dataset.initials === nextInitials) return;
+
+  avatar.dataset.photo = nextPhoto;
+  avatar.dataset.initials = nextInitials;
+  avatar.replaceChildren();
+
+  if (nextPhoto) {
     const image = document.createElement("img");
-    image.src = displayFriend.photo;
+    image.src = nextPhoto;
     image.alt = "";
     avatar.append(image);
   } else {
-    avatar.textContent = initials(displayFriend.name);
+    avatar.textContent = nextInitials;
   }
-
-  return avatar;
 }
 
 async function securedMemberProfile(existing, profile, groupCode, pin) {

@@ -9,12 +9,12 @@
     <meta name="apple-mobile-web-app-title" content="Festival Buddy">
     <meta name="apple-itunes-app" content="app-id=561212119">
     <title>Festival Buddy</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260513-3">
+    <link rel="manifest" href="manifest.webmanifest?v=20260513-5">
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260512-28">
-    <link rel="stylesheet" href="styles.css?v=20260513-3">
+    <link rel="stylesheet" href="styles.css?v=20260513-5">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260513-3"></script>
+    <script type="module" src="app.js?v=20260513-5"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Join Festival Buddy group">
@@ -28,7 +28,6 @@
           <a class="yang-link compact" href="https://www.instagram.com/yangyangyy/" target="_blank" rel="noopener">Questions ask Yang</a>
           <span id="cloudBadge">Secure group sync</span>
         </div>
-        <p class="friend-note">Friends use only. Questions? Ask @yangyangyy.</p>
         <h1>Find your crew. Own the grid.</h1>
         <p class="auth-copy">Start or join a private crew code, upload your schedule, and switch between live location and timeline fallback when the signal gets weird.</p>
 
@@ -150,7 +149,7 @@
         <div class="timeline-row">
           <div id="dayButtons" class="segmented"></div>
           <button id="currentLocationButton" class="current-location-switch" type="button" aria-pressed="false">
-            <span>Current Location</span>
+            <span>Live Location</span>
             <span class="switch-track" aria-hidden="true">
               <span class="switch-thumb"></span>
             </span>
@@ -221,7 +220,6 @@
         <div class="button-row">
           <button id="saveProfileButton" class="action-button" type="button">Save</button>
           <button id="switchGroupButton" class="action-button secondary" type="button">Switch group</button>
-          <button id="signOutButton" class="action-button secondary danger" type="button">Log out</button>
         </div>
         <p id="profileMessage" class="muted"></p>
       </form>
@@ -248,6 +246,22 @@
           </div>
         </div>
         <div id="friendDetailSchedule" class="parsed-list"></div>
+      </form>
+    </dialog>
+
+    <dialog id="bucketDialog">
+      <form method="dialog" class="sheet">
+        <header class="sheet-header">
+          <div>
+            <span class="eyebrow">Same spot</span>
+            <h2 id="bucketTitle">Friends here</h2>
+          </div>
+          <button class="icon-button ghost" value="cancel" type="submit" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 12.6 12.6-1.4 1.4L5 6.4 6.4 5Zm12.6 1.4L6.4 19 5 17.6 17.6 5 19 6.4Z"/></svg>
+          </button>
+        </header>
+        <p id="bucketSubtitle" class="bucket-subtitle">GRID --</p>
+        <div id="bucketList" class="friend-list bucket-list"></div>
       </form>
     </dialog>
 
