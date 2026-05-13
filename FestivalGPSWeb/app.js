@@ -688,7 +688,7 @@ async function initBase44Cloud() {
     services.provider = "local";
     services.base44 = null;
     els.cloudBadge.textContent = "Local group store";
-    els.authMessage.textContent = `Base44 did not start: ${error.message || error}`;
+    els.authMessage.textContent = "";
     return false;
   }
 }
