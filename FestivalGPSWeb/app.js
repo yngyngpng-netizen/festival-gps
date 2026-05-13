@@ -8,9 +8,13 @@ const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
 const PIN_BUCKET_THRESHOLD = 3;
 const PIN_DRAG_THRESHOLD_PX = 6;
+const MAX_GROUP_MEMBERS = 30;
+const MAX_ACTIVE_GROUPS = 10;
 const FRIEND_STRIP_RENDER_LIMIT = 80;
 const GROUP_REFRESH_DEBOUNCE_MS = 2500;
 const GROUP_RENDER_DEBOUNCE_MS = 400;
+const PIN_MOVE_THRESHOLD = 0.006;
+const LARGE_GROUP_PIN_MOVE_THRESHOLD = 0.014;
 const EDC_GEO_MARGIN = 0.00035;
 const MAP_PIN_BOUNDS = {
   minX: 0.045,
@@ -269,7 +273,7 @@ async function init() {
   bindEvents();
   setGroupMode("create");
   await initCloud();
-  hydrateLocalSession();
+  if (!state.user) hydrateLocalSession({ allowCloudFallback: true });
   renderAuthGate();
 }
 
@@ -725,13 +729,13 @@ async function resumeBase44Session() {
   }
 }
 
-function hydrateLocalSession() {
-  if (services.cloud) return;
-  if (!localStore.session?.uid || !localStore.session?.groupCode) return;
+function hydrateLocalSession(options = {}) {
+  if (services.cloud && !options.allowCloudFallback) return false;
+  if (!localStore.session?.uid || !localStore.session?.groupCode) return false;
 
   const group = localStore.groups[localStore.session.groupCode];
   const user = group?.members?.[localStore.session.uid];
-  if (!group || !user) return;
+  if (!group || !user) return false;
 
   state.selectedDay = localStore.selectedDay || state.selectedDay;
   state.selectedMinute = localStore.selectedMinute || state.selectedMinute;
@@ -739,6 +743,7 @@ function hydrateLocalSession() {
   state.groupCode = localStore.session.groupCode;
   state.friends = friendsFromGroup(group);
   selectedFriendId = user.id;
+  return true;
 }
 
 async function handleAuthSubmit(event) {
@@ -769,9 +774,9 @@ async function handleAuthSubmit(event) {
       const cloudProfile = pendingAuthPhoto
         ? { ...profile, photo: await uploadBase44Photo(pendingAuthFile, pendingAuthPhoto) }
         : profile;
-      await enterBase44GroupByName(groupCode, cloudProfile, pin);
+      await enterBase44GroupByName(groupCode, cloudProfile, pin, { creating: groupMode === "create" });
     } else {
-      await enterLocalGroupByName(profile, groupCode, pin);
+      await enterLocalGroupByName(profile, groupCode, pin, { creating: groupMode === "create" });
     }
 
     els.authForm.reset();
@@ -791,7 +796,7 @@ async function handleAuthSubmit(event) {
   }
 }
 
-async function enterBase44GroupByName(groupCode, profile, pin) {
+async function enterBase44GroupByName(groupCode, profile, pin, options = {}) {
   const CrewMember = services.base44.entities.CrewMember;
   const records = await CrewMember.filter({ groupCode });
   const allMembers = records.map((record) => normalizeMember(record));
@@ -804,6 +809,12 @@ async function enterBase44GroupByName(groupCode, profile, pin) {
     throw new Error("Upload a profile picture before entering the app.");
   }
   const ownerExists = friends.some((friend) => friend.isGroupOwner);
+  await enforceBase44GroupLimits(CrewMember, {
+    groupCode,
+    friends,
+    existing,
+    creating: Boolean(options.creating)
+  });
   const secured = await securedMemberProfile(existing, {
     ...profile,
     isGroupOwner: existing?.isGroupOwner || !ownerExists
@@ -930,7 +941,7 @@ async function refreshBase44Group(groupCode) {
   }
 }
 
-async function enterLocalGroupByName(profile, groupCode, pin) {
+async function enterLocalGroupByName(profile, groupCode, pin, options = {}) {
   const group = localStore.groups[groupCode] || { code: groupCode, members: {} };
   const allMembers = Object.values(group.members || {}).map(normalizeMember);
   const removedProfile = allMembers.find((friend) => sameName(friend.name, profile.name) && isRemovedMember(friend));
@@ -942,6 +953,12 @@ async function enterLocalGroupByName(profile, groupCode, pin) {
     throw new Error("Upload a profile picture before entering the app.");
   }
   const ownerExists = friends.some((friend) => friend.isGroupOwner);
+  enforceLocalGroupLimits({
+    groupCode,
+    friends,
+    existing,
+    creating: Boolean(options.creating)
+  });
   const secured = await securedMemberProfile(existing, {
     ...profile,
     isGroupOwner: existing?.isGroupOwner || !ownerExists
@@ -956,6 +973,71 @@ async function enterLocalGroupByName(profile, groupCode, pin) {
   state.friends = friendsFromGroup(group);
   selectedFriendId = member.id;
   cacheCurrentGroup();
+}
+
+async function enforceBase44GroupLimits(CrewMember, { groupCode, friends, existing, creating }) {
+  if (!existing && friends.length >= MAX_GROUP_MEMBERS) {
+    throw new Error(`This group is full. Festival Buddy allows up to ${MAX_GROUP_MEMBERS} people per group.`);
+  }
+
+  if (!creating) return;
+
+  if (friends.length && !existing) {
+    throw new Error("That group code already exists. Generate a new group code or join it instead.");
+  }
+
+  if (friends.length) return;
+
+  const allMembers = await fetchAllCrewMembers(CrewMember);
+  const groupCodes = mergedActiveGroupCodes(allMembers, cachedCrewMembers());
+  if (!groupCodes.has(groupCode) && groupCodes.size >= MAX_ACTIVE_GROUPS) {
+    throw new Error(`Festival Buddy already has ${MAX_ACTIVE_GROUPS} active groups. Ask Yang before creating another group.`);
+  }
+}
+
+function enforceLocalGroupLimits({ groupCode, friends, existing, creating }) {
+  if (!existing && friends.length >= MAX_GROUP_MEMBERS) {
+    throw new Error(`This group is full. Festival Buddy allows up to ${MAX_GROUP_MEMBERS} people per group.`);
+  }
+
+  if (!creating) return;
+
+  if (friends.length && !existing) {
+    throw new Error("That group code already exists. Generate a new group code or join it instead.");
+  }
+
+  const groupCodes = activeGroupCodes(cachedCrewMembers());
+  if (!groupCodes.has(groupCode) && groupCodes.size >= MAX_ACTIVE_GROUPS) {
+    throw new Error(`Festival Buddy already has ${MAX_ACTIVE_GROUPS} active groups. Ask Yang before creating another group.`);
+  }
+}
+
+async function fetchAllCrewMembers(CrewMember) {
+  try {
+    const records = await CrewMember.filter({});
+    return records.map((record) => normalizeMember(record));
+  } catch {
+    return [];
+  }
+}
+
+function activeGroupCodes(members) {
+  return new Set(activeMembers(members)
+    .map((member) => normalizeGroupCode(member.groupCode))
+    .filter(Boolean));
+}
+
+function mergedActiveGroupCodes(...memberLists) {
+  return new Set(memberLists.flatMap((members) => [...activeGroupCodes(members)]));
+}
+
+function cachedCrewMembers() {
+  return Object.entries(localStore.groups || {}).flatMap(([code, group]) => (
+    Object.values(group.members || {}).map((member) => normalizeMember({
+      ...member,
+      groupCode: member.groupCode || code
+    }))
+  ));
 }
 
 async function persistCurrentMember(options = {}) {
@@ -1358,8 +1440,8 @@ function setGroupMode(mode) {
   els.authGroupCode.placeholder = creating ? "Auto-generated" : "Friend's group code";
   els.regenerateGroupButton.hidden = !creating;
   els.groupModeHint.textContent = creating
-    ? "Start a new crew and share this private group code with friends."
-    : "Enter the group code your friend shared with you.";
+    ? `Start a private crew. Max ${MAX_GROUP_MEMBERS} people per group, ${MAX_ACTIVE_GROUPS} groups total.`
+    : `Enter the group code your friend shared with you. Groups cap at ${MAX_GROUP_MEMBERS} people.`;
   if (creating && (previousMode !== "create" || !els.authGroupCode.value.trim())) {
     els.authGroupCode.value = generateGroupCode();
   } else if (!creating) {
@@ -1735,6 +1817,7 @@ function renderRoutes() {
 function renderPins() {
   const layout = pinLayout();
   const nextPositions = new Map();
+  const moveThreshold = pinMoveThreshold();
   const activeIds = new Set(layout.singles.map(({ friend }) => friend.id));
   const activeBucketIds = new Set(layout.buckets.map((bucket) => bucket.id));
 
@@ -1753,7 +1836,7 @@ function renderPins() {
 
   layout.singles.forEach(({ friend, position, grid }) => {
     const previous = lastPinPositions.get(friend.id);
-    const isMoving = Boolean(previous && Math.hypot(previous.x - position.x, previous.y - position.y) > 0.01);
+    const isMoving = pinMoved(previous, position, moveThreshold);
     const dragKey = `friend:${friend.id}`;
     let pin = friendPinById.get(friend.id);
     const isNew = !pin;
@@ -1807,13 +1890,15 @@ function renderPins() {
     if (isNew) {
       const start = previous || position;
       setPinElementPosition(pin, visualPositionForPin(dragKey, start));
-      if (previous) {
+      if (isMoving) {
         pin.classList.add("walking");
         window.clearTimeout(pin._walkTimer);
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
         requestAnimationFrame(() => {
           setPinElementPosition(pin, visualPositionForPin(dragKey, position));
         });
+      } else {
+        setPinElementPosition(pin, visualPositionForPin(dragKey, position));
       }
     } else {
       pin.classList.toggle("walking", isMoving);
@@ -1821,9 +1906,7 @@ function renderPins() {
         window.clearTimeout(pin._walkTimer);
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
       }
-      requestAnimationFrame(() => {
-        setPinElementPosition(pin, visualPositionForPin(dragKey, position));
-      });
+      setPinElementPosition(pin, visualPositionForPin(dragKey, position));
     }
 
     nextPositions.set(friend.id, position);
@@ -1832,7 +1915,7 @@ function renderPins() {
   layout.buckets.forEach((bucket) => {
     const key = `bucket:${bucket.id}`;
     const previous = lastPinPositions.get(key) || previousBucketPosition(bucket);
-    const isMoving = Boolean(previous && Math.hypot(previous.x - bucket.position.x, previous.y - bucket.position.y) > 0.01);
+    const isMoving = pinMoved(previous, bucket.position, moveThreshold);
     let pin = bucketPinById.get(bucket.id);
     const isNew = !pin;
 
@@ -1898,13 +1981,15 @@ function renderPins() {
     if (isNew) {
       const start = previous || bucket.position;
       setPinElementPosition(pin, visualPositionForPin(key, start));
-      if (previous) {
+      if (isMoving) {
         pin.classList.add("walking");
         window.clearTimeout(pin._walkTimer);
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
         requestAnimationFrame(() => {
           setPinElementPosition(pin, visualPositionForPin(key, bucket.position));
         });
+      } else {
+        setPinElementPosition(pin, visualPositionForPin(key, bucket.position));
       }
     } else {
       pin.classList.toggle("walking", isMoving);
@@ -1912,9 +1997,7 @@ function renderPins() {
         window.clearTimeout(pin._walkTimer);
         pin._walkTimer = window.setTimeout(() => pin.classList.remove("walking"), 1700);
       }
-      requestAnimationFrame(() => {
-        setPinElementPosition(pin, visualPositionForPin(key, bucket.position));
-      });
+      setPinElementPosition(pin, visualPositionForPin(key, bucket.position));
     }
 
     nextPositions.set(key, bucket.position);
@@ -1929,6 +2012,14 @@ function previousBucketPosition(bucket) {
     .map((friend) => lastPinPositions.get(friend.id))
     .filter(Boolean);
   return positions.length ? averagePosition(positions) : null;
+}
+
+function pinMoveThreshold() {
+  return state.friends.length >= 24 ? LARGE_GROUP_PIN_MOVE_THRESHOLD : PIN_MOVE_THRESHOLD;
+}
+
+function pinMoved(previous, next, threshold = PIN_MOVE_THRESHOLD) {
+  return Boolean(previous && next && Math.hypot(previous.x - next.x, previous.y - next.y) > threshold);
 }
 
 function bindPinDrag(pin) {
@@ -2027,32 +2118,46 @@ function positionFromPinElement(pin) {
 }
 
 function renderFriendStrip() {
-  els.friendStrip.replaceChildren();
+  const members = friendStripMembers();
+  const activeIds = new Set(members.map((friend) => friend.id));
 
-  friendStripMembers().forEach((friend) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "friend-chip";
+  [...els.friendStrip.querySelectorAll(".friend-chip")].forEach((chip) => {
+    if (!activeIds.has(chip.dataset.friendId)) chip.remove();
+  });
+
+  const existing = new Map([...els.friendStrip.querySelectorAll(".friend-chip")]
+    .map((chip) => [chip.dataset.friendId, chip]));
+
+  members.forEach((friend) => {
+    let chip = existing.get(friend.id);
+    if (!chip) {
+      chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "friend-chip";
+      chip.dataset.friendId = friend.id;
+      chip.addEventListener("click", () => {
+        openFriendDetailById(chip.dataset.friendId);
+      });
+
+      const copy = document.createElement("span");
+      copy.className = "chip-copy";
+      const name = document.createElement("span");
+      name.className = "chip-name";
+      const status = document.createElement("span");
+      status.className = "chip-status";
+
+      copy.append(name, status);
+      chip.append(avatarElement(friend, "mini-avatar"), copy);
+    }
+
+    chip.dataset.friendId = friend.id;
     chip.classList.toggle("active", friend.id === selectedFriendId);
     chip.style.setProperty("--friend-color", friend.color || "#53e2ff");
-    chip.addEventListener("click", () => {
-      selectedFriendId = friend.id;
-      renderAll();
-      renderFriendDetail(friend);
-      openDialog(els.friendDetailDialog);
-    });
-
-    const copy = document.createElement("span");
-    copy.className = "chip-copy";
-    const name = document.createElement("span");
-    name.className = "chip-name";
+    refreshAvatarElement(chip.querySelector(".mini-avatar"), friend);
+    const name = chip.querySelector(".chip-name");
     name.textContent = friend.name || "Friend";
-    const status = document.createElement("span");
-    status.className = "chip-status";
+    const status = chip.querySelector(".chip-status");
     status.textContent = statusText(friend);
-
-    copy.append(name, status);
-    chip.append(avatarElement(friend, "mini-avatar"), copy);
     els.friendStrip.append(chip);
   });
 }
@@ -2076,63 +2181,98 @@ function renderFriendList(target = els.friendList, options = {}) {
   const closeDialog = options.closeDialog === undefined ? els.friendsDialog : options.closeDialog;
   const management = Boolean(options.management);
   const canManage = management && currentUserCanManageGroup();
-  target.replaceChildren();
+  const mode = canManage ? "manager" : "viewer";
+  if (target.dataset.listMode !== mode) {
+    target.replaceChildren();
+    target.dataset.listMode = mode;
+  }
   target.classList.toggle("manager-list", management);
 
+  const activeIds = new Set(state.friends.map((friend) => friend.id));
+  [...target.querySelectorAll(".friend-row")].forEach((row) => {
+    if (!activeIds.has(row.dataset.friendId)) row.remove();
+  });
+  const existingRows = new Map([...target.querySelectorAll(".friend-row")]
+    .map((row) => [row.dataset.friendId, row]));
+
   state.friends.forEach((friend) => {
-    const row = document.createElement(canManage ? "div" : "button");
-    if (!canManage) row.type = "button";
-    row.className = "friend-row";
-    row.classList.toggle("has-actions", canManage);
-    row.classList.toggle("active", friend.id === selectedFriendId);
-    row.style.setProperty("--friend-color", friend.color || "#53e2ff");
-
-    const openFriend = () => {
-      selectedFriendId = friend.id;
-      renderAll();
-      renderFriendDetail(friend);
-      if (closeDialog?.open) closeDialog.close();
-      openDialog(els.friendDetailDialog);
-    };
-
-    const copy = document.createElement("span");
-    copy.className = "chip-copy";
-    const name = document.createElement("span");
-    name.className = "chip-name";
-    name.textContent = friend.name || "Friend";
-    if (friend.isGroupOwner) {
-      const manager = document.createElement("span");
-      manager.className = "manager-pill";
-      manager.textContent = "Manager";
-      name.append(manager);
+    let row = existingRows.get(friend.id);
+    if (!row) {
+      row = createFriendListRow(friend, { canManage, closeDialog });
     }
-    const status = document.createElement("span");
-    status.className = "chip-status";
-    status.textContent = statusText(friend);
 
-    copy.append(name, status);
-    if (canManage) {
-      const openButton = document.createElement("button");
-      openButton.type = "button";
-      openButton.className = "friend-row-main";
-      openButton.addEventListener("click", openFriend);
-      openButton.append(avatarElement(friend, "mini-avatar"), copy);
-      row.append(openButton);
-
-      if (friend.id !== state.user?.id) {
-        const removeButton = document.createElement("button");
-        removeButton.type = "button";
-        removeButton.className = "remove-friend-button";
-        removeButton.textContent = "Remove";
-        removeButton.addEventListener("click", () => removeFriendFromGroup(friend.id));
-        row.append(removeButton);
-      }
-    } else {
-      row.addEventListener("click", openFriend);
-      row.append(avatarElement(friend, "mini-avatar"), copy);
-    }
+    updateFriendListRow(row, friend, { canManage, closeDialog });
     target.append(row);
   });
+}
+
+function createFriendListRow(friend, { canManage, closeDialog }) {
+  const row = document.createElement(canManage ? "div" : "button");
+  if (!canManage) row.type = "button";
+  row.className = "friend-row";
+  row.dataset.friendId = friend.id;
+  row._closeDialog = closeDialog;
+
+  const copy = document.createElement("span");
+  copy.className = "chip-copy";
+  const name = document.createElement("span");
+  name.className = "chip-name";
+  const status = document.createElement("span");
+  status.className = "chip-status";
+  copy.append(name, status);
+
+  if (canManage) {
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "friend-row-main";
+    openButton.addEventListener("click", () => openFriendDetailById(row.dataset.friendId, row._closeDialog));
+    openButton.append(avatarElement(friend, "mini-avatar"), copy);
+    row.append(openButton);
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "remove-friend-button";
+    removeButton.textContent = "Remove";
+    removeButton.addEventListener("click", () => removeFriendFromGroup(row.dataset.friendId));
+    row.append(removeButton);
+  } else {
+    row.addEventListener("click", () => openFriendDetailById(row.dataset.friendId, row._closeDialog));
+    row.append(avatarElement(friend, "mini-avatar"), copy);
+  }
+
+  return row;
+}
+
+function updateFriendListRow(row, friend, { canManage, closeDialog }) {
+  row.dataset.friendId = friend.id;
+  row._closeDialog = closeDialog;
+  row.classList.toggle("has-actions", canManage);
+  row.classList.toggle("active", friend.id === selectedFriendId);
+  row.style.setProperty("--friend-color", friend.color || "#53e2ff");
+  refreshAvatarElement(row.querySelector(".mini-avatar"), friend);
+
+  const name = row.querySelector(".chip-name");
+  name.textContent = friend.name || "Friend";
+  if (friend.isGroupOwner) {
+    const manager = document.createElement("span");
+    manager.className = "manager-pill";
+    manager.textContent = "Manager";
+    name.append(manager);
+  }
+
+  row.querySelector(".chip-status").textContent = statusText(friend);
+  const removeButton = row.querySelector(".remove-friend-button");
+  if (removeButton) removeButton.hidden = friend.id === state.user?.id;
+}
+
+function openFriendDetailById(friendId, closeDialog = null) {
+  const friend = state.friends.find((item) => item.id === friendId);
+  if (!friend) return;
+  selectedFriendId = friend.id;
+  renderAll();
+  renderFriendDetail(friend);
+  if (closeDialog?.open) closeDialog.close();
+  openDialog(els.friendDetailDialog);
 }
 
 function renderBucketDetail(bucket = null) {
@@ -2145,38 +2285,54 @@ function renderBucketDetail(bucket = null) {
   selectedBucketId = currentBucket.id;
   els.bucketTitle.textContent = `${currentBucket.friends.length} friends here`;
   els.bucketSubtitle.textContent = `${currentBucket.label} - GRID ${currentBucket.grid}`;
-  els.bucketList.replaceChildren();
+  if (els.bucketList.dataset.bucketId !== currentBucket.id) {
+    els.bucketList.replaceChildren();
+    els.bucketList.dataset.bucketId = currentBucket.id;
+  }
+
+  const activeIds = new Set(currentBucket.friends.map((friend) => friend.id));
+  [...els.bucketList.querySelectorAll(".bucket-row")].forEach((row) => {
+    if (!activeIds.has(row.dataset.friendId)) row.remove();
+  });
+  const existingRows = new Map([...els.bucketList.querySelectorAll(".bucket-row")]
+    .map((row) => [row.dataset.friendId, row]));
 
   currentBucket.friends.forEach((friend) => {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "friend-row bucket-row";
+    let row = existingRows.get(friend.id);
+    if (!row) {
+      row = document.createElement("button");
+      row.type = "button";
+      row.className = "friend-row bucket-row";
+      row.dataset.friendId = friend.id;
+      row.addEventListener("click", () => {
+        openFriendDetailById(row.dataset.friendId);
+        if (els.bucketDialog.open) els.bucketDialog.close();
+      });
+
+      const copy = document.createElement("span");
+      copy.className = "chip-copy";
+      const name = document.createElement("span");
+      name.className = "chip-name";
+      const status = document.createElement("span");
+      status.className = "chip-status";
+      const grid = document.createElement("span");
+      grid.className = "bucket-row-grid";
+
+      copy.append(name, status);
+      row.append(avatarElement(friend, "mini-avatar"), copy, grid);
+    }
+
+    row.dataset.friendId = friend.id;
     row.classList.toggle("active", friend.id === selectedFriendId);
     row.style.setProperty("--friend-color", friend.color || "#53e2ff");
-    row.addEventListener("click", () => {
-      selectedFriendId = friend.id;
-      if (els.bucketDialog.open) els.bucketDialog.close();
-      renderAll();
-      renderFriendDetail(friend);
-      openDialog(els.friendDetailDialog);
-    });
-
-    const copy = document.createElement("span");
-    copy.className = "chip-copy";
-    const name = document.createElement("span");
-    name.className = "chip-name";
-    name.textContent = friend.name || "Friend";
-    const status = document.createElement("span");
-    status.className = "chip-status";
-    status.textContent = statusText(friend);
+    refreshAvatarElement(row.querySelector(".mini-avatar"), friend);
     const friendGrid = gridForFriend(friend);
-    const grid = document.createElement("span");
-    grid.className = "bucket-row-grid";
-    grid.textContent = friendGrid;
-
+    const name = row.querySelector(".chip-name");
+    name.textContent = friend.name || "Friend";
     name.append(` · ${friendGrid}`);
-    copy.append(name, status);
-    row.append(avatarElement(friend, "mini-avatar"), copy, grid);
+    row.querySelector(".chip-status").textContent = statusText(friend);
+    const grid = row.querySelector(".bucket-row-grid");
+    grid.textContent = friendGrid;
     els.bucketList.append(row);
   });
 }
@@ -2379,15 +2535,7 @@ function renderProfilePreview(friend) {
 }
 
 function renderAvatarInto(container, friend) {
-  container.replaceChildren();
-  if (friend.photo) {
-    const image = document.createElement("img");
-    image.src = friend.photo;
-    image.alt = "";
-    container.append(image);
-  } else {
-    container.textContent = initials(friend.name);
-  }
+  refreshAvatarElement(container, friend);
 }
 
 function renderParsedSchedule() {
@@ -3061,10 +3209,19 @@ function stageForFriend(friend) {
   if (currentLocationMode) {
     const mapped = locationOverrideForFriend(friend);
     if (mapped?.stageId) return stageById(mapped.stageId);
-    return scheduledStageForFriend(friend, { includeUpcoming: true }) || stageById("speedway-entry");
+    return liveModeScheduleStageForFriend(friend) || stageById("speedway-entry");
   }
 
   return scheduledStageForFriend(friend) || stageById("speedway-entry");
+}
+
+function liveModeScheduleStageForFriend(friend) {
+  const lastKnown = lastKnownLocationForFriend(friend);
+  if (!lastKnown || lastKnown.outsideVenue) return null;
+  if (staleLocationShouldUseSchedule(friend, lastKnown) || scheduleSupersedesLastLocation(friend, lastKnown)) {
+    return scheduledStageForFriend(friend, { includeUpcoming: true });
+  }
+  return null;
 }
 
 function scheduledStageForFriend(friend, options = {}) {
@@ -3114,8 +3271,6 @@ function statusText(friend) {
       const prefix = lastKnown.outsideVenue ? "Outside venue" : "Last seen";
       return `${prefix}: Grid ${gridForLiveLocation(lastKnown)}, ${stageById(lastKnown.stageId).name}`;
     }
-    const active = activeEvent(friend);
-    if (active) return `No signal: ${active.artist}, ${stageById(active.stageId).name}`;
     return "No live GPS: Speedway Entry";
   }
 
@@ -3366,6 +3521,7 @@ function locationCanPin(live) {
 }
 
 function staleLocationShouldUseSchedule(friend, lastKnown) {
+  if (lastKnown?.outsideVenue) return false;
   if (!liveLocationIsStale(lastKnown)) return false;
   return Boolean(activeEvent(friend) || displayEvent(friend));
 }
@@ -3380,6 +3536,7 @@ function gridForLiveLocation(live) {
 }
 
 function scheduleSupersedesLastLocation(friend, lastKnown) {
+  if (lastKnown?.outsideVenue) return false;
   const active = activeEvent(friend);
   if (!active) return false;
 
