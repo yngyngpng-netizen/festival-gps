@@ -256,6 +256,8 @@ let activePinDrag = null;
 let groupRefreshTimer = null;
 let groupRenderTimer = null;
 let savedGroupRenderToken = 0;
+let memberWriteQueue = Promise.resolve();
+let memberWriteSequence = 0;
 const pinDragOffsets = new Map();
 const artistImageCache = new Map();
 const artistImagePending = new Map();
@@ -833,11 +835,12 @@ async function enterBase44GroupByName(groupCode, profile, pin, options = {}) {
   const CrewMember = services.base44.entities.CrewMember;
   const records = await CrewMember.filter({ groupCode });
   const allMembers = records.map((record) => normalizeMember(record));
-  const removedProfile = allMembers.find((friend) => sameName(friend.name, profile.name) && isRemovedMember(friend));
+  const profileKey = { name: profile.name, nameKey: nameKey(profile.name) };
+  const removedProfile = allMembers.find((friend) => sameMemberName(friend, profileKey) && isRemovedMember(friend));
   if (removedProfile) throw new Error("That profile was removed from this group. Use another user name or ask the group manager.");
 
   const friends = activeMembers(allMembers);
-  const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  const existing = friends.find((friend) => sameMemberName(friend, profileKey));
   if (existing) {
     throw new Error("That user name is already in this group. Use Returning user with your PIN, or pick a unique name.");
   }
@@ -864,7 +867,7 @@ async function enterBase44GroupByName(groupCode, profile, pin, options = {}) {
   const saved = existing?.id
     ? await CrewMember.update(existing.id, memberData)
     : await CrewMember.create(memberData);
-  const member = normalizeMember(saved);
+  const member = await ensureBase44MemberCanStay(CrewMember, groupCode, normalizeMember(saved));
 
   state.user = member;
   state.groupCode = groupCode;
@@ -936,6 +939,10 @@ function scheduleGroupRender() {
 function applyCrewMemberUpdate(member) {
   if (!member?.id) return;
 
+  const existing = state.friends.find((friend) => friend.id === member.id)
+    || (member.id === state.user?.id ? state.user : null);
+  if (memberIsOlder(member, existing)) return;
+
   const nextFriends = state.friends.filter((friend) => friend.id !== member.id);
   if (!isRemovedMember(member)) nextFriends.push(member);
   state.friends = nextFriends.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -989,11 +996,12 @@ function syncCloudAfterCachedRestore() {
 async function enterLocalGroupByName(profile, groupCode, pin, options = {}) {
   const group = localStore.groups[groupCode] || { code: groupCode, members: {} };
   const allMembers = Object.values(group.members || {}).map(normalizeMember);
-  const removedProfile = allMembers.find((friend) => sameName(friend.name, profile.name) && isRemovedMember(friend));
+  const profileKey = { name: profile.name, nameKey: nameKey(profile.name) };
+  const removedProfile = allMembers.find((friend) => sameMemberName(friend, profileKey) && isRemovedMember(friend));
   if (removedProfile) throw new Error("That profile was removed from this group. Use another user name or ask the group manager.");
 
   const friends = activeMembers(allMembers);
-  const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  const existing = friends.find((friend) => sameMemberName(friend, profileKey));
   if (existing) {
     throw new Error("That user name is already in this group. Use Returning user with your PIN, or pick a unique name.");
   }
@@ -1069,6 +1077,58 @@ async function fetchAllCrewMembers(CrewMember) {
   }
 }
 
+async function ensureBase44MemberCanStay(CrewMember, groupCode, member) {
+  const records = await CrewMember.filter({ groupCode });
+  const members = activeMembers(records.map((record) => normalizeMember(record)));
+  const capacityWinnerIds = new Set(members
+    .sort(compareMemberClaim)
+    .slice(0, MAX_GROUP_MEMBERS)
+    .map((friend) => friend.id));
+
+  if (!capacityWinnerIds.has(member.id)) {
+    await removeBase44RaceLoser(CrewMember, member, "group-full");
+    throw new Error(`This group is full. Festival Buddies allows up to ${MAX_GROUP_MEMBERS} people per group.`);
+  }
+
+  const duplicates = members
+    .filter((friend) => sameMemberName(friend, member))
+    .sort(compareMemberClaim);
+
+  if (duplicates.length <= 1) return member;
+
+  const winner = duplicates[0];
+  await Promise.all(duplicates.slice(1).map((friend) => removeBase44RaceLoser(CrewMember, friend, "duplicate-name")));
+  if (winner.id !== member.id) {
+    throw new Error("That user name was claimed at the same time. Use Returning user with your PIN, or pick a unique name.");
+  }
+  return winner;
+}
+
+async function removeBase44RaceLoser(CrewMember, member, reason) {
+  const removedAt = new Date().toISOString();
+  try {
+    await CrewMember.update(member.id, sanitizeMember({
+      ...member,
+      liveLocation: null,
+      removedAt,
+      removedBy: reason,
+      updatedAt: removedAt
+    }));
+  } catch {
+    // The next group refresh will reconcile any duplicate that could not be cleaned up immediately.
+  }
+}
+
+function compareMemberClaim(left, right) {
+  const leftTime = Date.parse(left.createdAt || left.updatedAt || "") || 0;
+  const rightTime = Date.parse(right.createdAt || right.updatedAt || "") || 0;
+  return leftTime - rightTime || String(left.id).localeCompare(String(right.id));
+}
+
+function sameMemberName(left, right) {
+  return (left?.nameKey || nameKey(left?.name)) === (right?.nameKey || nameKey(right?.name));
+}
+
 function activeGroupCodes(members) {
   return new Set(activeMembers(members)
     .map((member) => normalizeGroupCode(member.groupCode))
@@ -1089,14 +1149,24 @@ function cachedCrewMembers() {
 }
 
 async function persistCurrentMember(options = {}) {
+  memberWriteQueue = memberWriteQueue
+    .catch(() => {})
+    .then(() => persistCurrentMemberNow(options));
+  return memberWriteQueue;
+}
+
+async function persistCurrentMemberNow(options = {}) {
   const user = currentUser();
   if (!user?.id || !state.groupCode) return;
+  const writeSequence = ++memberWriteSequence;
+  const updatedAt = new Date().toISOString();
 
   if (services.provider === "base44") {
     const updated = sanitizeMember({
       ...user,
       groupCode: state.groupCode,
-      userId: user.userId || user.id
+      userId: user.userId || user.id,
+      updatedAt
     });
     if (options.updateProfile === false) {
       const recoveredPhoto = findCachedMemberPhoto(user, state.groupCode);
@@ -1107,11 +1177,17 @@ async function persistCurrentMember(options = {}) {
       }
     }
     const saved = await services.base44.entities.CrewMember.update(user.id, updated);
-    state.user = normalizeMember(saved);
-    applyCrewMemberUpdate(state.user);
+    let member = normalizeMember(saved);
+    if (options.enforceUniqueName) {
+      member = await ensureBase44MemberCanStay(services.base44.entities.CrewMember, state.groupCode, member);
+    }
+    if (writeSequence >= memberWriteSequence || !memberIsOlder(member, state.user)) {
+      state.user = member;
+      applyCrewMemberUpdate(state.user);
+    }
   } else {
     const group = localStore.groups[state.groupCode] || { code: state.groupCode, members: {} };
-    group.members[user.id] = normalizeMember(user);
+    group.members[user.id] = normalizeMember({ ...user, updatedAt });
     localStore.groups[state.groupCode] = group;
     localStore.session = { uid: user.id, groupCode: state.groupCode };
     state.friends = friendsFromGroup(group);
@@ -1125,7 +1201,8 @@ async function saveProfile() {
   const nextName = cleanName(els.profileName.value);
   const canManage = currentUserCanManageGroup();
   const nextGroupName = canManage ? cleanGroupName(els.profileGroupName.value) : groupNameFromMembers(state.friends);
-  const duplicate = state.friends.some((friend) => friend.id !== user.id && sameName(friend.name, nextName));
+  const nextNameMember = { name: nextName, nameKey: nameKey(nextName) };
+  const duplicate = state.friends.some((friend) => friend.id !== user.id && sameMemberName(friend, nextNameMember));
   if (duplicate) {
     els.profileMessage.textContent = "That name is already in this group. Pick another user name.";
     return;
@@ -1144,7 +1221,7 @@ async function saveProfile() {
   state.user = user;
 
   try {
-    await persistCurrentMember();
+    await persistCurrentMember({ enforceUniqueName: true });
     pendingProfilePhoto = "";
     pendingProfileFile = null;
     renderAll();
@@ -1621,13 +1698,14 @@ function savedGroupMessage(text) {
 
 async function savedGroupSearch(rawName, pin) {
   const name = cleanName(rawName);
+  const nameMember = { name, nameKey: nameKey(name) };
   const groups = await savedGroupSearchGroups(name);
   const matches = [];
   let wrongPin = false;
 
   for (const normalizedGroup of groups.values()) {
     const members = activeMembers(Object.values(normalizedGroup.members || {}));
-    const member = members.find((friend) => sameName(friend.name, name));
+    const member = members.find((friend) => sameMemberName(friend, nameMember));
     if (!member?.pinHash) continue;
     if (await verifyPin(pin, member.pinHash, member.pinSalt, normalizedGroup.code)) {
       matches.push({
@@ -1691,7 +1769,7 @@ async function fetchReturningNameMembers(CrewMember, rawName) {
     records
       .map((record) => normalizeMember(record))
       .filter((member) => member.groupCode && !isRemovedMember(member))
-      .filter((member) => !wantedNameKey || nameKey(member.name) === wantedNameKey)
+      .filter((member) => !wantedNameKey || sameMemberName(member, { name: rawName, nameKey: wantedNameKey }))
       .forEach((member) => {
         const key = member.id || `${normalizeGroupCode(member.groupCode)}:${nameKey(member.name)}`;
         recordsById.set(key, memberWithRecoveredPhoto(member, member.groupCode));
@@ -1706,6 +1784,14 @@ async function fetchReturningNameMembers(CrewMember, rawName) {
     trimmedName.toLowerCase(),
     trimmedName.toUpperCase()
   ].filter(Boolean))];
+
+  if (wantedNameKey) {
+    try {
+      addRecords(await CrewMember.filter({ nameKey: wantedNameKey }));
+    } catch {
+      // Older rows may not have nameKey yet.
+    }
+  }
 
   for (const name of queryNames) {
     try {
@@ -4210,12 +4296,14 @@ async function securedMemberProfile(existing, profile, groupCode, pin) {
     userId: existing?.userId || profile.userId || groupNameUserId(groupCode, profile.name),
     groupCode,
     name: profile.name,
+    nameKey: nameKey(profile.name),
     groupName: cleanGroupName(profile.groupName || existing?.groupName || ""),
     email: "",
     photo: profile.photo || existing?.photo || "",
     color: existing?.color || profile.color || randomColor(),
     isGroupOwner: Boolean(existing?.isGroupOwner || profile.isGroupOwner),
     createdAt: existing?.createdAt || profile.createdAt || new Date().toISOString(),
+    updatedAt: profile.updatedAt || existing?.updatedAt || new Date().toISOString(),
     removedAt: "",
     removedBy: "",
     pinHash,
@@ -4230,11 +4318,13 @@ function normalizeMember(member) {
     id: member.id || cryptoId(),
     userId: member.userId || member.authUserId || "",
     name: cleanName(member.name),
+    nameKey: member.nameKey || nameKey(member.name),
     email: member.email || "",
     photo: member.photo || "",
     color: member.color || randomColor(),
     isGroupOwner: Boolean(member.isGroupOwner),
     createdAt: member.createdAt || member.created_at || member.created_date || "",
+    updatedAt: member.updatedAt || member.updated_at || member.updated_date || "",
     removedAt: member.removedAt || "",
     removedBy: member.removedBy || "",
     pinHash: member.pinHash || "",
@@ -4251,11 +4341,13 @@ function sanitizeMember(member) {
   return {
     userId: normalized.userId,
     name: normalized.name,
+    nameKey: normalized.nameKey,
     email: normalized.email,
     photo: normalized.photo,
     color: normalized.color,
     isGroupOwner: normalized.isGroupOwner,
     createdAt: normalized.createdAt,
+    updatedAt: normalized.updatedAt || member.updatedAt,
     removedAt: normalized.removedAt,
     removedBy: normalized.removedBy,
     pinHash: normalized.pinHash,
@@ -4263,8 +4355,7 @@ function sanitizeMember(member) {
     groupCode: normalized.groupCode,
     groupName: normalized.groupName,
     schedule: normalized.schedule,
-    liveLocation: normalized.liveLocation,
-    updatedAt: member.updatedAt
+    liveLocation: normalized.liveLocation
   };
 }
 
@@ -4306,6 +4397,20 @@ function activeMembers(members) {
 
 function isRemovedMember(member) {
   return Boolean(member?.removedAt);
+}
+
+function memberTimestamp(member) {
+  const updated = Date.parse(member?.updatedAt || "");
+  if (Number.isFinite(updated)) return updated;
+  const created = Date.parse(member?.createdAt || "");
+  return Number.isFinite(created) ? created : 0;
+}
+
+function memberIsOlder(incoming, existing) {
+  if (!incoming || !existing) return false;
+  const incomingTime = memberTimestamp(incoming);
+  const existingTime = memberTimestamp(existing);
+  return Boolean(incomingTime && existingTime && incomingTime < existingTime);
 }
 
 function currentUserCanManageGroup() {
@@ -4565,10 +4670,12 @@ function compactOfflineGroup(groupCode, group) {
       id: normalized.id,
       userId: normalized.userId,
       name: normalized.name,
+      nameKey: normalized.nameKey,
       photo: offlinePhotoValue(normalized.photo),
       color: normalized.color,
       isGroupOwner: normalized.isGroupOwner,
       createdAt: normalized.createdAt,
+      updatedAt: normalized.updatedAt,
       removedAt: normalized.removedAt,
       removedBy: normalized.removedBy,
       pinHash: normalized.pinHash,

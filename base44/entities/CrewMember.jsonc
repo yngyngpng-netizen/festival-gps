@@ -21,6 +21,11 @@
       "type": "string",
       "maxLength": 80
     },
+    "nameKey": {
+      "type": "string",
+      "description": "Normalized name used for duplicate prevention and returning-user lookup.",
+      "maxLength": 80
+    },
     "email": {
       "type": "string",
       "maxLength": 160
@@ -47,6 +52,9 @@
       "default": false
     },
     "createdAt": {
+      "type": "string"
+    },
+    "updatedAt": {
       "type": "string"
     },
     "removedAt": {
