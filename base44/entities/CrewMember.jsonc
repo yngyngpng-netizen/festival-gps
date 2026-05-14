@@ -12,6 +12,11 @@
       "type": "string",
       "maxLength": 24
     },
+    "groupName": {
+      "type": "string",
+      "description": "Manager-edited display name for the group.",
+      "maxLength": 40
+    },
     "name": {
       "type": "string",
       "maxLength": 80

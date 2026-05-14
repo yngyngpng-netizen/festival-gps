@@ -605,9 +605,9 @@ textarea {
   max-width: none;
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 5px 6px 5px 10px;
+  padding: 5px 10px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px;
+  grid-template-columns: minmax(0, 1fr);
   column-gap: 6px;
   align-items: center;
   background: rgba(5, 9, 18, 0.72);
@@ -618,7 +618,6 @@ textarea {
 .group-code-chip span,
 .group-code-chip strong {
   min-width: 0;
-  grid-column: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -639,14 +638,6 @@ textarea {
   font-weight: 950;
   letter-spacing: 0.02em;
   line-height: 1.05;
-}
-
-.copy-mini {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  background: var(--yellow);
-  color: #090a10;
-  border-color: transparent;
 }
 
 .group-chip {
@@ -1169,6 +1160,24 @@ textarea {
   text-align: center;
   pointer-events: auto;
   cursor: pointer;
+}
+
+.stage-marker.label-only {
+  width: auto;
+  min-width: 74px;
+  cursor: default;
+}
+
+.stage-marker.label-only .stage-photo,
+.stage-marker.label-only .stage-artist {
+  display: none !important;
+}
+
+.stage-marker.label-only .stage-name {
+  max-width: 118px;
+  padding: 5px 8px;
+  background: rgba(6, 8, 12, 0.92);
+  border-color: rgba(255, 235, 0, 0.62);
 }
 
 .stage-photo {
@@ -1925,9 +1934,10 @@ output {
   background: rgba(255, 235, 0, 0.12);
   border: 1px solid rgba(255, 235, 0, 0.46);
   color: var(--yellow);
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 950;
-  letter-spacing: 0.04em;
+  line-height: 1.25;
+  letter-spacing: 0;
 }
 
 .bucket-list {
@@ -2618,7 +2628,7 @@ dialog::backdrop {
     width: clamp(132px, 38vw, 170px);
     max-width: none;
     padding: 3px 4px 3px 7px;
-    grid-template-columns: minmax(0, 1fr) 26px;
+    grid-template-columns: minmax(0, 1fr);
     border-radius: 12px;
   }
 
@@ -2628,12 +2638,6 @@ dialog::backdrop {
 
   .group-code-chip strong {
     font-size: 10px;
-  }
-
-  .copy-mini {
-    width: 26px;
-    min-height: 26px;
-    border-radius: 10px;
   }
 
   .icon-button {

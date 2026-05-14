@@ -9,12 +9,12 @@
     <meta name="apple-mobile-web-app-title" content="F Buddies">
     <meta name="apple-itunes-app" content="app-id=561212119">
     <title>Festival Buddies</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260513-25">
-    <link rel="icon" href="assets/icon.svg?v=20260513-25" type="image/svg+xml">
-    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260513-25">
-    <link rel="stylesheet" href="styles.css?v=20260513-25">
+    <link rel="manifest" href="manifest.webmanifest?v=20260513-28">
+    <link rel="icon" href="assets/icon.svg?v=20260513-28" type="image/svg+xml">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260513-28">
+    <link rel="stylesheet" href="styles.css?v=20260513-28">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260513-25"></script>
+    <script type="module" src="app.js?v=20260513-28"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Join Festival Buddies group">
@@ -27,8 +27,8 @@
         <div class="auth-kicker">
           <a class="yang-link compact" href="https://www.instagram.com/yangyangyy/" target="_blank" rel="noopener">Questions ask Yang</a>
         </div>
-        <h1>Festival Buddies</h1>
-        <p class="auth-copy">Use live GPS when signal works, then fall back to cached last-seen grid, schedules, set times, and stage pins when phones go offline.</p>
+        <h1>Meet your festival buddies under Electric Sky</h1>
+        <p class="auth-copy">Festival Buddies caches the EDC grid map, crew schedules, last-seen locations, official set times, and artist timeline on your phone. Use live GPS when signal works; when service drops, it still shows each friend's last grid or scheduled stage so you can regroup around the right set.</p>
         <div class="auth-tabs" role="tablist" aria-label="Login type">
           <button id="newUserTab" class="active" type="button" role="tab" aria-selected="true">New user</button>
           <button id="returningUserTab" type="button" role="tab" aria-selected="false">Returning user</button>
@@ -86,12 +86,9 @@
           </div>
         </div>
         <div class="top-meta">
-          <div class="group-code-chip" aria-label="Group code">
+          <div class="group-code-chip" aria-label="Group">
             <span>Group</span>
             <strong id="groupCodeLabel">GROUP</strong>
-            <button class="icon-mini copy-mini" id="copyCodeButton" type="button" aria-label="Copy group code">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z"/></svg>
-            </button>
           </div>
           <div class="toolbar" aria-label="Festival actions">
             <button class="icon-button live" id="locationButton" type="button" aria-label="Share live location">
@@ -208,6 +205,8 @@
           <div class="field-stack">
             <label for="profileName">Name</label>
             <input id="profileName" type="text" autocomplete="name">
+            <label for="profileGroupName">Group name</label>
+            <input id="profileGroupName" type="text" autocomplete="off" maxlength="40" placeholder="Your crew name">
             <label for="profilePhoto">Profile picture</label>
             <input id="profilePhoto" type="file" accept="image/*">
           </div>

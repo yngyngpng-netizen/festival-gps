@@ -9,7 +9,7 @@ const LIVE_LOCATION_THROTTLE_MS = 15 * 1000;
 const PROFILE_PHOTO_SIZE = 192;
 const PROFILE_PHOTO_QUALITY = 0.68;
 const MAX_OFFLINE_PHOTO_CHARS = 220000;
-const PIN_BUCKET_THRESHOLD = 3;
+const PIN_BUCKET_THRESHOLD = 2;
 const PIN_DRAG_THRESHOLD_PX = 6;
 const MAX_GROUP_MEMBERS = 20;
 const MAX_ACTIVE_GROUPS = 10;
@@ -108,6 +108,7 @@ const EDC_GRID_GEO_CORNERS = {
 };
 const GEO_X_SCALE = Math.cos(EDC_CENTER.lat * Math.PI / 180);
 const MAPKIT_JS_URL = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js";
+const LABEL_ONLY_STAGE_IDS = new Set(["art-cars", "downtown-edc"]);
 
 const days = {
   friday: { label: "Friday", short: "Fri", date: "May 15", start: 17 * 60, end: 29 * 60 + 30 },
@@ -406,6 +407,7 @@ function bindElements() {
     "friendList",
     "profileDialog",
     "profileName",
+    "profileGroupName",
     "profilePhoto",
     "profilePreview",
     "profileGroupCode",
@@ -476,7 +478,7 @@ function bindEvents() {
     }
   });
 
-  els.copyCodeButton.addEventListener("click", copyGroupCode);
+  els.copyCodeButton?.addEventListener("click", copyGroupCode);
   els.crewProfileButton.addEventListener("click", openProfileSheet);
   els.locationButton.addEventListener("click", toggleLiveLocation);
   els.map.addEventListener("click", handleMapClick);
@@ -836,6 +838,9 @@ async function enterBase44GroupByName(groupCode, profile, pin, options = {}) {
 
   const friends = activeMembers(allMembers);
   const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  if (existing) {
+    throw new Error("That user name is already in this group. Use Returning user with your PIN, or pick a unique name.");
+  }
   if (!profile.photo && !existing?.photo) {
     throw new Error("Upload a profile picture before entering the app.");
   }
@@ -989,6 +994,9 @@ async function enterLocalGroupByName(profile, groupCode, pin, options = {}) {
 
   const friends = activeMembers(allMembers);
   const existing = friends.find((friend) => sameName(friend.name, profile.name));
+  if (existing) {
+    throw new Error("That user name is already in this group. Use Returning user with your PIN, or pick a unique name.");
+  }
   if (!profile.photo && !existing?.photo) {
     throw new Error("Upload a profile picture before entering the app.");
   }
@@ -1115,12 +1123,19 @@ async function persistCurrentMember(options = {}) {
 async function saveProfile() {
   const user = currentUser();
   const nextName = cleanName(els.profileName.value);
+  const canManage = currentUserCanManageGroup();
+  const nextGroupName = canManage ? cleanGroupName(els.profileGroupName.value) : groupNameFromMembers(state.friends);
   const duplicate = state.friends.some((friend) => friend.id !== user.id && sameName(friend.name, nextName));
   if (duplicate) {
     els.profileMessage.textContent = "That name is already in this group. Pick another user name.";
     return;
   }
+  if (canManage && !nextGroupName) {
+    els.profileMessage.textContent = "Enter a group name.";
+    return;
+  }
   user.name = nextName;
+  if (canManage) user.groupName = nextGroupName;
   if (pendingProfilePhoto) {
     user.photo = services.provider === "base44"
       ? await uploadBase44Photo(pendingProfileFile, pendingProfilePhoto)
@@ -1187,7 +1202,7 @@ async function signOutUser(options = {}) {
   if (services.unsubscribeGroup) services.unsubscribeGroup();
   services.unsubscribeGroup = null;
 
-  if (services.provider === "base44" && services.base44) {
+  if (options.cloudLogout && services.provider === "base44" && services.base44) {
     try {
       services.base44.auth.logout();
     } catch {
@@ -1195,6 +1210,11 @@ async function signOutUser(options = {}) {
     }
   }
 
+  closeOpenDialogs();
+  els.map?.classList.remove("expanded");
+  document.body.classList.remove("map-expanded");
+  if (els.mapExpandButton) els.mapExpandButton.hidden = false;
+  if (els.mapCloseButton) els.mapCloseButton.hidden = true;
   localStore.session = null;
   localStore.shareLocation = false;
   localStore.currentLocationMode = false;
@@ -1205,11 +1225,11 @@ async function signOutUser(options = {}) {
   resetState();
   renderAuthGate();
   if (options.message) els.authMessage.textContent = options.message;
-  if (els.profileDialog.open) els.profileDialog.close();
 }
 
 async function switchGroup() {
   await signOutUser();
+  setAuthMode("new");
   setGroupMode("join");
   els.authName.value = "";
   els.authPin.value = "";
@@ -1217,7 +1237,7 @@ async function switchGroup() {
   pendingAuthPhoto = "";
   pendingAuthFile = null;
   renderAuthPhotoPreview("", "");
-  requestAnimationFrame(() => els.authGroupCode.focus());
+  requestAnimationFrame(() => els.authName.focus());
 }
 
 async function toggleLiveLocation() {
@@ -1463,10 +1483,14 @@ function showTopFeedback(message) {
 
 function openProfileSheet() {
   const user = currentUser();
+  const canManage = currentUserCanManageGroup();
   els.profileName.value = user.name || "";
+  els.profileGroupName.value = groupDisplayName();
+  els.profileGroupName.disabled = !canManage;
+  els.profileGroupName.readOnly = !canManage;
   els.profileGroupCode.textContent = state.groupCode || "NO GROUP";
-  els.profileMessage.textContent = currentUserCanManageGroup()
-    ? "Manager mode: copy the group code to invite friends or remove stale people."
+  els.profileMessage.textContent = canManage
+    ? "Manager mode: edit the group name, copy the code, or remove stale people."
     : "";
   pendingProfilePhoto = "";
   renderProfilePreview(user);
@@ -1554,7 +1578,7 @@ async function renderSavedGroupOptions() {
   if (!result.matches.length) {
     els.savedGroupPanel.append(savedGroupMessage(result.wrongPin
       ? "PIN is not correct."
-      : "No saved or synced group found for that name."));
+      : "No group found for that user name. New users should join with a group code first."));
     return;
   }
 
@@ -1563,8 +1587,8 @@ async function renderSavedGroupOptions() {
     button.type = "button";
     button.className = "saved-group-button";
     button.append(
-      Object.assign(document.createElement("strong"), { textContent: match.groupCode }),
-      Object.assign(document.createElement("span"), { textContent: `${match.friendCount} crew` })
+      Object.assign(document.createElement("strong"), { textContent: groupDisplayName(match.groupCode, Object.values(match.group?.members || {}), match.group) }),
+      Object.assign(document.createElement("span"), { textContent: `${match.groupCode} - ${match.friendCount} crew` })
     );
     button.addEventListener("click", async () => {
       setBusy(true);
@@ -1597,7 +1621,7 @@ function savedGroupMessage(text) {
 
 async function savedGroupSearch(rawName, pin) {
   const name = cleanName(rawName);
-  const groups = await savedGroupSearchGroups();
+  const groups = await savedGroupSearchGroups(name);
   const matches = [];
   let wrongPin = false;
 
@@ -1623,30 +1647,36 @@ async function savedGroupSearch(rawName, pin) {
   };
 }
 
-async function savedGroupSearchGroups() {
+async function savedGroupSearchGroups(rawName = "") {
   const groups = new Map();
 
   Object.entries(localStore.groups || {}).forEach(([code, group]) => {
-    const normalizedGroup = normalizeCachedGroup(code, group);
-    if (normalizedGroup) groups.set(normalizedGroup.code, normalizedGroup);
+    mergeGroupIntoSearchMap(groups, code, group);
   });
 
   if (services.provider !== "base44" || !services.base44 || !navigator.onLine) {
     return groups;
   }
 
+  const CrewMember = services.base44.entities.CrewMember;
   try {
-    const records = await services.base44.entities.CrewMember.filter({});
-    records
-      .map((record) => normalizeMember(record))
-      .map((member) => memberWithRecoveredPhoto(member, member.groupCode))
-      .filter((member) => member.groupCode && !isRemovedMember(member))
-      .forEach((member) => {
-        const code = normalizeGroupCode(member.groupCode);
-        const group = groups.get(code) || { code, members: {} };
-        group.members[member.id] = mergeMemberKeepingPhoto(group.members[member.id], member);
-        groups.set(code, group);
-      });
+    const namedMembers = await fetchReturningNameMembers(CrewMember, rawName);
+    const groupCodes = new Set();
+    namedMembers.forEach((member) => {
+      const code = normalizeGroupCode(member.groupCode);
+      if (!code) return;
+      groupCodes.add(code);
+      mergeMemberIntoSearchMap(groups, member, code);
+    });
+
+    await Promise.all([...groupCodes].map(async (code) => {
+      try {
+        const records = await CrewMember.filter({ groupCode: code });
+        mergeRecordsIntoSearchMap(groups, records, code);
+      } catch {
+        // The matching member still lets returning users unlock this group.
+      }
+    }));
   } catch {
     // Local saved groups still work offline or if the cloud search is unavailable.
   }
@@ -1654,10 +1684,85 @@ async function savedGroupSearchGroups() {
   return groups;
 }
 
+async function fetchReturningNameMembers(CrewMember, rawName) {
+  const wantedNameKey = nameKey(rawName);
+  const recordsById = new Map();
+  const addRecords = (records) => {
+    records
+      .map((record) => normalizeMember(record))
+      .filter((member) => member.groupCode && !isRemovedMember(member))
+      .filter((member) => !wantedNameKey || nameKey(member.name) === wantedNameKey)
+      .forEach((member) => {
+        const key = member.id || `${normalizeGroupCode(member.groupCode)}:${nameKey(member.name)}`;
+        recordsById.set(key, memberWithRecoveredPhoto(member, member.groupCode));
+      });
+  };
+
+  const trimmedName = String(rawName || "").trim();
+  const queryNames = [...new Set([
+    cleanName(rawName),
+    trimmedName,
+    titleCaseName(trimmedName),
+    trimmedName.toLowerCase(),
+    trimmedName.toUpperCase()
+  ].filter(Boolean))];
+
+  for (const name of queryNames) {
+    try {
+      addRecords(await CrewMember.filter({ name }));
+    } catch {
+      // Try the next lookup shape, then fall back to a broad search.
+    }
+  }
+
+  if (!recordsById.size) {
+    try {
+      addRecords(await CrewMember.filter({}));
+    } catch {
+      // Returning users can still use local cached groups.
+    }
+  }
+
+  return [...recordsById.values()];
+}
+
+function mergeGroupIntoSearchMap(groups, code, group) {
+  const normalizedGroup = normalizeCachedGroup(code, group);
+  if (!normalizedGroup) return;
+  const target = groups.get(normalizedGroup.code) || { code: normalizedGroup.code, members: {} };
+  if (normalizedGroup.name) target.name = normalizedGroup.name;
+  groups.set(normalizedGroup.code, target);
+  Object.values(normalizedGroup.members || {}).forEach((member) => {
+    mergeMemberIntoSearchMap(groups, member, normalizedGroup.code);
+  });
+}
+
+function mergeRecordsIntoSearchMap(groups, records, fallbackCode = "") {
+  records
+    .map((record) => normalizeMember({
+      ...record,
+      groupCode: record.groupCode || fallbackCode
+    }))
+    .forEach((member) => mergeMemberIntoSearchMap(groups, member, fallbackCode));
+}
+
+function mergeMemberIntoSearchMap(groups, member, fallbackCode = "") {
+  const code = normalizeGroupCode(member.groupCode || fallbackCode);
+  if (!code || isRemovedMember(member)) return;
+  const normalized = memberWithRecoveredPhoto(normalizeMember({
+    ...member,
+    groupCode: code
+  }), code);
+  const group = groups.get(code) || { code, members: {} };
+  if (normalized.groupName && (normalized.isGroupOwner || !group.name)) group.name = normalized.groupName;
+  group.members[normalized.id] = mergeMemberKeepingPhoto(group.members[normalized.id], normalized);
+  groups.set(code, group);
+}
+
 async function enterFirstSavedGroup(rawName, pin) {
   const result = await savedGroupSearch(rawName, pin);
   if (!result.matches.length) {
-    throw new Error(result.wrongPin ? "PIN is not correct." : "No saved or synced group found for that name.");
+    throw new Error(result.wrongPin ? "PIN is not correct." : "No group found for that user name. New users should join with a group code first.");
   }
   if (result.matches.length > 1) {
     await renderSavedGroupOptions();
@@ -1746,9 +1851,14 @@ function renderAll() {
   els.startTimeLabel.textContent = formatTime(day.start);
   els.endTimeLabel.textContent = formatTime(day.end);
   els.currentContext.textContent = `${day.label} ${day.date} - ${formatTime(state.selectedMinute)}`;
-  els.groupCodeLabel.textContent = state.groupCode;
+  const groupName = groupDisplayName();
+  els.groupCodeLabel.textContent = groupName;
+  els.groupCodeLabel.title = groupName === state.groupCode ? state.groupCode : `${groupName} (${state.groupCode})`;
   els.friendGroupCode.textContent = state.groupCode;
   els.profileGroupCode.textContent = state.groupCode;
+  if (els.profileDialog.open && els.profileGroupName && document.activeElement !== els.profileGroupName) {
+    els.profileGroupName.value = groupName;
+  }
   els.currentLocationButton.classList.toggle("active", currentLocationMode);
   els.currentLocationButton.setAttribute("aria-pressed", String(currentLocationMode));
   renderLocationState();
@@ -1887,8 +1997,9 @@ function renderStages() {
   });
 
   stages.filter((stage) => stage.id !== "speedway-entry").forEach((stage) => {
+    const labelOnly = labelOnlyStage(stage);
     const position = screenPositionForStage(stage);
-    const now = stageNowSummary(stage);
+    const now = labelOnly ? null : stageNowSummary(stage);
     let marker = els.stageLayer.querySelector(`[data-stage-id="${cssEscape(stage.id)}"]`);
 
     if (!marker) {
@@ -1897,6 +2008,7 @@ function renderStages() {
       marker.className = "stage-marker";
       marker.dataset.stageId = stage.id;
       marker.addEventListener("click", (event) => {
+        if (labelOnlyStage(stage)) return;
         event.stopPropagation();
         selectedStageId = stage.id;
         renderStageDetail(stage);
@@ -1910,6 +2022,7 @@ function renderStages() {
       els.stageLayer.append(marker);
     }
 
+    marker.classList.toggle("label-only", labelOnly);
     marker.style.left = `${position.x * 100}%`;
     marker.style.top = `${position.y * 100}%`;
     marker.style.setProperty("--stage-color", stage.color);
@@ -1919,9 +2032,10 @@ function renderStages() {
     const photo = marker.querySelector(".stage-photo");
     const name = marker.querySelector(".stage-name");
     const artist = marker.querySelector(".stage-artist");
-    refreshStagePhoto(photo, stage, now);
     name.textContent = stage.name;
-    artist.hidden = !now;
+    photo.hidden = labelOnly;
+    artist.hidden = labelOnly || !now;
+    if (!labelOnly) refreshStagePhoto(photo, stage, now);
     if (now) {
       artist.textContent = now.label;
       artist.title = now.title;
@@ -1930,6 +2044,10 @@ function renderStages() {
       artist.title = "";
     }
   });
+}
+
+function labelOnlyStage(stage) {
+  return LABEL_ONLY_STAGE_IDS.has(stage?.id);
 }
 
 function refreshStagePhoto(photo, stage, now) {
@@ -2532,7 +2650,7 @@ function renderBucketDetail(bucket = null) {
 
   selectedBucketId = currentBucket.id;
   els.bucketTitle.textContent = `${currentBucket.friends.length} friends here`;
-  els.bucketSubtitle.textContent = `${currentBucket.label} - GRID ${currentBucket.grid}`;
+  els.bucketSubtitle.textContent = `${currentBucket.label} group - map center ${currentBucket.grid}. Rows show each friend's exact grid.`;
   if (els.bucketList.dataset.bucketId !== currentBucket.id) {
     els.bucketList.replaceChildren();
     els.bucketList.dataset.bucketId = currentBucket.id;
@@ -3580,8 +3698,7 @@ function pinLayout() {
     const stage = stageForFriend(friend);
     const basePosition = basePositionForFriend(friend, stage);
     const grid = gridForPosition(basePosition);
-    const live = currentLocationMode && liveLocationForFriend(friend);
-    const id = live ? `${stage.id}-${grid}` : stage.id;
+    const id = stage.id;
     const existing = groups.get(id) || {
       id,
       stage,
@@ -4093,6 +4210,7 @@ async function securedMemberProfile(existing, profile, groupCode, pin) {
     userId: existing?.userId || profile.userId || groupNameUserId(groupCode, profile.name),
     groupCode,
     name: profile.name,
+    groupName: cleanGroupName(profile.groupName || existing?.groupName || ""),
     email: "",
     photo: profile.photo || existing?.photo || "",
     color: existing?.color || profile.color || randomColor(),
@@ -4122,6 +4240,7 @@ function normalizeMember(member) {
     pinHash: member.pinHash || "",
     pinSalt: member.pinSalt || pinSaltFromHash(member.pinHash) || "",
     groupCode: member.groupCode || state.groupCode || "",
+    groupName: cleanGroupName(member.groupName || member.groupTitle || member.group_name || ""),
     schedule: Array.isArray(member.schedule) ? member.schedule.map(normalizeEvent).filter(Boolean) : [],
     liveLocation: normalizeLiveLocation(member.liveLocation)
   };
@@ -4142,6 +4261,7 @@ function sanitizeMember(member) {
     pinHash: normalized.pinHash,
     pinSalt: normalized.pinSalt,
     groupCode: normalized.groupCode,
+    groupName: normalized.groupName,
     schedule: normalized.schedule,
     liveLocation: normalized.liveLocation,
     updatedAt: member.updatedAt
@@ -4278,6 +4398,7 @@ function leanLocalStore(store) {
     });
     groups[code] = {
       ...group,
+      name: cleanGroupName(group.name),
       members
     };
   });
@@ -4297,8 +4418,10 @@ function cacheCurrentGroup() {
   const members = new Map();
   state.friends.forEach((friend) => members.set(friend.id, normalizeMember(friend)));
   members.set(state.user.id, normalizeMember(state.user));
+  const normalizedMembers = [...members.values()];
   localStore.groups[state.groupCode] = {
     code: state.groupCode,
+    name: groupNameFromMembers(normalizedMembers) || cleanGroupName(localStore.groups[state.groupCode]?.name),
     members: Object.fromEntries(members)
   };
   localStore.session = { uid: state.user.id, groupCode: state.groupCode };
@@ -4357,7 +4480,11 @@ function normalizeCachedGroup(groupCode, group) {
     });
     members[normalized.id || id] = normalized;
   });
-  return { code, members };
+  return {
+    code,
+    name: cleanGroupName(group.name) || groupNameFromMembers(Object.values(members)),
+    members
+  };
 }
 
 function mergeMemberKeepingPhoto(existing, next) {
@@ -4447,11 +4574,16 @@ function compactOfflineGroup(groupCode, group) {
       pinHash: normalized.pinHash,
       pinSalt: normalized.pinSalt,
       groupCode: code,
+      groupName: normalized.groupName,
       schedule: normalized.schedule,
       liveLocation: normalized.liveLocation
     };
   });
-  return { code, members };
+  return {
+    code,
+    name: cleanGroupName(group?.name) || groupNameFromMembers(Object.values(members)),
+    members
+  };
 }
 
 function offlinePhotoValue(photo) {
@@ -4813,6 +4945,16 @@ function openDialog(dialog) {
   }
 }
 
+function closeOpenDialogs() {
+  document.querySelectorAll("dialog[open]").forEach((dialog) => {
+    if (typeof dialog.close === "function") {
+      dialog.close();
+    } else {
+      dialog.removeAttribute("open");
+    }
+  });
+}
+
 function formatTime(minute) {
   const wrapped = ((Math.round(minute) % (24 * 60)) + (24 * 60)) % (24 * 60);
   const hour24 = Math.floor(wrapped / 60);
@@ -4956,6 +5098,42 @@ function initials(name) {
 function cleanName(name) {
   const value = String(name || "").trim();
   return value || "You";
+}
+
+function cleanGroupName(name) {
+  return String(name || "").trim().replace(/\s+/g, " ").slice(0, 40);
+}
+
+function groupDisplayName(groupCode = state.groupCode, members = state.friends, group = null) {
+  const code = normalizeGroupCode(groupCode);
+  const localGroup = group || localStore.groups?.[code] || null;
+  const backupGroup = localGroup ? null : readGroupBackup(code);
+  const groupMembers = [
+    ...members,
+    ...Object.values(localGroup?.members || {}),
+    ...Object.values(backupGroup?.members || {}),
+    state.user
+  ].filter(Boolean);
+
+  return cleanGroupName(localGroup?.name)
+    || cleanGroupName(backupGroup?.name)
+    || groupNameFromMembers(groupMembers)
+    || code
+    || "Group";
+}
+
+function groupNameFromMembers(members = []) {
+  const active = activeMembers(members.map((member) => normalizeMember(member)));
+  const owner = active.find((member) => member.isGroupOwner && member.groupName);
+  const named = active.find((member) => member.groupName);
+  return cleanGroupName(owner?.groupName || named?.groupName || "");
+}
+
+function titleCaseName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/(^|[\s_-])([a-z])/g, (_, prefix, letter) => `${prefix}${letter.toUpperCase()}`);
 }
 
 function escapeRegExp(value) {
