@@ -9,12 +9,12 @@
     <meta name="apple-mobile-web-app-title" content="F Buddies">
     <meta name="apple-itunes-app" content="app-id=561212119">
     <title>Festival Buddies</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260513-29">
-    <link rel="icon" href="assets/icon.svg?v=20260513-29" type="image/svg+xml">
-    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260513-29">
-    <link rel="stylesheet" href="styles.css?v=20260513-29">
+    <link rel="manifest" href="manifest.webmanifest?v=20260514-1">
+    <link rel="icon" href="assets/icon.svg?v=20260514-1" type="image/svg+xml">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20260514-1">
+    <link rel="stylesheet" href="styles.css?v=20260514-1">
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script type="module" src="app.js?v=20260513-29"></script>
+    <script type="module" src="app.js?v=20260514-1"></script>
   </head>
   <body>
     <section id="onboarding" class="onboarding" aria-label="Join Festival Buddies group">
@@ -224,6 +224,7 @@
         </section>
         <div class="button-row">
           <button id="saveProfileButton" class="action-button" type="button">Save</button>
+          <button id="adminButton" class="action-button secondary" type="button" hidden>System admin</button>
           <button id="switchGroupButton" class="action-button secondary" type="button">Switch group</button>
         </div>
         <p id="profileMessage" class="muted"></p>
@@ -339,6 +340,46 @@
           </div>
         </div>
         <div id="ocrStatus" class="progress-line"></div>
+      </form>
+    </dialog>
+
+    <dialog id="adminDialog">
+      <form method="dialog" class="sheet admin-sheet">
+        <header class="sheet-header">
+          <div>
+            <span class="eyebrow">System admin</span>
+            <h2>Festival Buddies Control</h2>
+          </div>
+          <button class="icon-button ghost" value="cancel" type="submit" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 12.6 12.6-1.4 1.4L5 6.4 6.4 5Zm12.6 1.4L6.4 19 5 17.6 17.6 5 19 6.4Z"/></svg>
+          </button>
+        </header>
+        <div class="admin-toolbar">
+          <label>
+            <span>Search users, groups, grid, status</span>
+            <input id="adminSearch" type="search" autocomplete="off" placeholder="Search">
+          </label>
+          <div class="button-row">
+            <button id="adminRefreshButton" class="action-button secondary" type="button">Refresh</button>
+            <button id="adminExportButton" class="action-button secondary" type="button">Export CSV</button>
+          </div>
+        </div>
+        <div id="adminStats" class="admin-stats" aria-label="App statistics"></div>
+        <section class="admin-section">
+          <div>
+            <span class="eyebrow">Groups</span>
+            <h3>Group controls</h3>
+          </div>
+          <div id="adminGroupList" class="admin-group-list"></div>
+        </section>
+        <section class="admin-section">
+          <div>
+            <span class="eyebrow">People</span>
+            <h3>Registered users</h3>
+          </div>
+          <div id="adminMemberList" class="admin-member-list"></div>
+        </section>
+        <p id="adminMessage" class="muted"></p>
       </form>
     </dialog>
   </body>

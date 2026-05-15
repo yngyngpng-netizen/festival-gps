@@ -16,6 +16,8 @@ const MAX_ACTIVE_GROUPS = 10;
 const FRIEND_STRIP_RENDER_LIMIT = 80;
 const GROUP_REFRESH_DEBOUNCE_MS = 2500;
 const GROUP_RENDER_DEBOUNCE_MS = 400;
+const SYSTEM_ADMIN_GROUP_CODE = "EDC-WTG-NS2";
+const SYSTEM_ADMIN_NAME_KEYS = new Set(["yang", "yangpeng", "yangyangyy"]);
 const PIN_MOVE_THRESHOLD = 0.006;
 const LARGE_GROUP_PIN_MOVE_THRESHOLD = 0.014;
 const EDC_GEO_MARGIN = 0.00035;
@@ -258,6 +260,9 @@ let groupRenderTimer = null;
 let savedGroupRenderToken = 0;
 let memberWriteQueue = Promise.resolve();
 let memberWriteSequence = 0;
+let adminRecords = [];
+let adminLoadedAt = 0;
+let adminActionQueue = Promise.resolve();
 const pinDragOffsets = new Map();
 const artistImageCache = new Map();
 const artistImagePending = new Map();
@@ -415,6 +420,7 @@ function bindElements() {
     "profileGroupCode",
     "copyGroupButton",
     "saveProfileButton",
+    "adminButton",
     "switchGroupButton",
     "profileMessage",
     "profileFriendList",
@@ -441,7 +447,15 @@ function bindElements() {
     "photoCropCancel",
     "scheduleDialog",
     "scheduleImage",
-    "ocrStatus"
+    "ocrStatus",
+    "adminDialog",
+    "adminSearch",
+    "adminRefreshButton",
+    "adminExportButton",
+    "adminStats",
+    "adminGroupList",
+    "adminMemberList",
+    "adminMessage"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -541,6 +555,7 @@ function bindEvents() {
   });
 
   els.saveProfileButton.addEventListener("click", saveProfile);
+  els.adminButton.addEventListener("click", openAdminDialog);
   els.switchGroupButton.addEventListener("click", switchGroup);
   els.copyGroupButton.addEventListener("click", copyGroupCode);
   els.copyGroupFromFriendsButton.addEventListener("click", copyGroupCode);
@@ -549,6 +564,9 @@ function bindEvents() {
     const files = [...(els.scheduleImage.files || [])];
     if (files.length) await recognizeScheduleFiles(files);
   });
+  els.adminSearch.addEventListener("input", renderAdminPanel);
+  els.adminRefreshButton.addEventListener("click", () => loadAdminPanel({ force: true }));
+  els.adminExportButton.addEventListener("click", exportAdminCsv);
 
   window.addEventListener("online", () => {
     if (state.user?.id && localStore.shareLocation && !locationSharing) {
@@ -1273,6 +1291,448 @@ async function removeFriendFromGroup(friendId) {
   }
 }
 
+function currentUserIsSystemAdmin() {
+  const user = currentUser();
+  return Boolean(
+    user?.id &&
+    SYSTEM_ADMIN_NAME_KEYS.has(nameKey(user.name)) &&
+    normalizeGroupCode(state.groupCode) === SYSTEM_ADMIN_GROUP_CODE &&
+    currentUserCanManageGroup()
+  );
+}
+
+async function openAdminDialog() {
+  if (!currentUserIsSystemAdmin()) {
+    els.profileMessage.textContent = "System admin is only available to Yang's manager profile.";
+    return;
+  }
+
+  els.adminMessage.textContent = "Loading admin data...";
+  openDialog(els.adminDialog);
+  await loadAdminPanel({ force: true });
+}
+
+async function loadAdminPanel(options = {}) {
+  if (!currentUserIsSystemAdmin()) return;
+  const freshEnough = Date.now() - adminLoadedAt < 15000;
+  if (!options.force && adminRecords.length && freshEnough) {
+    renderAdminPanel();
+    return;
+  }
+
+  try {
+    const cloudRecords = services.provider === "base44" && services.base44 && navigator.onLine
+      ? await fetchAllCrewMembers(services.base44.entities.CrewMember)
+      : [];
+    adminRecords = mergeAdminRecords(
+      cloudRecords,
+      cachedCrewMembers(),
+      state.friends,
+      [state.user].filter(Boolean)
+    );
+    adminLoadedAt = Date.now();
+    els.adminMessage.textContent = `Loaded ${adminRecords.length} records.`;
+    renderAdminPanel();
+  } catch (error) {
+    els.adminMessage.textContent = error.message || String(error);
+  }
+}
+
+function mergeAdminRecords(...recordSets) {
+  const records = new Map();
+  recordSets.flat().filter(Boolean).forEach((record) => {
+    const incoming = memberWithRecoveredPhoto(normalizeMember(record), record.groupCode);
+    const key = incoming.id || `${normalizeGroupCode(incoming.groupCode)}:${incoming.nameKey || nameKey(incoming.name)}`;
+    const existing = records.get(key);
+    if (!existing) {
+      records.set(key, incoming);
+      return;
+    }
+
+    const newer = memberIsOlder(incoming, existing) ? existing : incoming;
+    const older = newer === existing ? incoming : existing;
+    records.set(key, memberWithRecoveredPhoto({
+      ...older,
+      ...newer,
+      photo: newer.photo || older.photo || ""
+    }, newer.groupCode));
+  });
+
+  return [...records.values()]
+    .sort((a, b) => normalizeGroupCode(a.groupCode).localeCompare(normalizeGroupCode(b.groupCode)) || (a.name || "").localeCompare(b.name || ""));
+}
+
+function renderAdminPanel() {
+  if (!els.adminDialog?.open) return;
+  if (!currentUserIsSystemAdmin()) {
+    els.adminStats.replaceChildren();
+    els.adminGroupList.replaceChildren();
+    els.adminMemberList.replaceChildren();
+    els.adminMessage.textContent = "System admin access is locked.";
+    return;
+  }
+
+  const query = normalize(els.adminSearch.value);
+  const filteredMembers = adminRecords.filter((member) => adminMemberMatches(member, query));
+  const groups = adminGroupSummaries(adminRecords)
+    .filter((group) => adminGroupMatches(group, query) || group.members.some((member) => filteredMembers.includes(member)));
+
+  renderAdminStats(adminRecords);
+  renderAdminGroups(groups);
+  renderAdminMembers(filteredMembers);
+}
+
+function renderAdminStats(records) {
+  const active = activeMembers(records);
+  const removed = records.filter(isRemovedMember);
+  const groups = adminGroupSummaries(records);
+  const freshLive = active.filter((member) => liveLocationIsFresh(normalizeLiveLocation(member.liveLocation))).length;
+  const scheduled = active.filter((member) => member.schedule?.length).length;
+  const withPhotos = active.filter((member) => Boolean(member.photo)).length;
+  const stats = [
+    ["Groups", groups.length],
+    ["Active users", active.length],
+    ["Removed", removed.length],
+    ["Live now", freshLive],
+    ["Schedules", scheduled],
+    ["Photos", withPhotos]
+  ];
+
+  els.adminStats.replaceChildren(...stats.map(([label, value]) => {
+    const card = document.createElement("div");
+    card.className = "admin-stat";
+    card.append(
+      Object.assign(document.createElement("strong"), { textContent: value }),
+      Object.assign(document.createElement("span"), { textContent: label })
+    );
+    return card;
+  }));
+}
+
+function renderAdminGroups(groups) {
+  els.adminGroupList.replaceChildren();
+  if (!groups.length) {
+    els.adminGroupList.append(emptyAdminMessage("No groups match this search."));
+    return;
+  }
+
+  groups.forEach((group) => {
+    const card = document.createElement("article");
+    card.className = "admin-group-card";
+    const title = document.createElement("div");
+    title.className = "admin-group-title";
+    title.append(
+      Object.assign(document.createElement("strong"), { textContent: group.name }),
+      Object.assign(document.createElement("span"), { textContent: group.code })
+    );
+
+    const meta = document.createElement("div");
+    meta.className = "admin-meta";
+    meta.append(
+      adminChip(`${group.active.length}/${MAX_GROUP_MEMBERS} active`),
+      adminChip(`${group.removed.length} removed`),
+      adminChip(`${group.liveCount} live`),
+      adminChip(`${group.scheduleCount} schedules`)
+    );
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 40;
+    input.value = group.name === group.code ? "" : group.name;
+    input.placeholder = "Group display name";
+
+    const actions = document.createElement("div");
+    actions.className = "admin-actions";
+    actions.append(
+      adminActionButton("Save name", () => queueAdminAction(() => saveAdminGroupName(group.code, input.value))),
+      adminActionButton("Copy code", async () => {
+        const copied = await copyText(group.code);
+        els.adminMessage.textContent = copied ? `Copied ${group.code}.` : group.code;
+      }),
+      adminActionButton("Remove group", () => {
+        if (!window.confirm(`Remove all active people from ${group.name}?`)) return null;
+        return queueAdminAction(() => adminRemoveGroup(group.code));
+      }, "danger")
+    );
+
+    card.append(title, meta, input, actions);
+    els.adminGroupList.append(card);
+  });
+}
+
+function renderAdminMembers(members) {
+  els.adminMemberList.replaceChildren();
+  if (!members.length) {
+    els.adminMemberList.append(emptyAdminMessage("No users match this search."));
+    return;
+  }
+
+  members.forEach((member) => {
+    const row = document.createElement("article");
+    row.className = "admin-member-row";
+    row.classList.toggle("removed", isRemovedMember(member));
+    row.style.setProperty("--friend-color", member.color || "#53e2ff");
+
+    const copy = document.createElement("div");
+    copy.className = "admin-member-copy";
+    const name = document.createElement("strong");
+    name.textContent = member.name || "Friend";
+    const status = document.createElement("span");
+    status.textContent = adminMemberStatus(member);
+    const group = document.createElement("small");
+    group.textContent = `${adminGroupName(member.groupCode)} - ${normalizeGroupCode(member.groupCode)}`;
+    copy.append(name, status, group);
+
+    const metrics = document.createElement("div");
+    metrics.className = "admin-meta";
+    metrics.append(
+      adminChip(`${member.schedule?.length || 0} sets`),
+      adminChip(adminGridText(member)),
+      adminChip(member.isGroupOwner ? "manager" : "member")
+    );
+
+    const actions = document.createElement("div");
+    actions.className = "admin-actions";
+    if (isRemovedMember(member)) {
+      actions.append(adminActionButton("Restore", () => queueAdminAction(() => adminRestoreMember(member.id))));
+    } else {
+      actions.append(adminActionButton("Remove", () => queueAdminAction(() => adminRemoveMember(member.id)), "danger"));
+    }
+    actions.append(
+      adminActionButton(member.isGroupOwner ? "Unset manager" : "Make manager", () => queueAdminAction(() => adminToggleManager(member.id))),
+      adminActionButton("Clear GPS", () => queueAdminAction(() => adminClearLive(member.id)))
+    );
+
+    row.append(avatarElement(member, "mini-avatar"), copy, metrics, actions);
+    els.adminMemberList.append(row);
+  });
+}
+
+function adminGroupSummaries(records) {
+  const groups = new Map();
+  records.forEach((member) => {
+    const code = normalizeGroupCode(member.groupCode);
+    if (!code) return;
+    const group = groups.get(code) || { code, members: [] };
+    group.members.push(member);
+    groups.set(code, group);
+  });
+
+  return [...groups.values()].map((group) => {
+    const active = activeMembers(group.members);
+    const removed = group.members.filter(isRemovedMember);
+    return {
+      ...group,
+      name: groupNameFromMembers(group.members) || codeFallbackName(group.code),
+      active,
+      removed,
+      liveCount: active.filter((member) => liveLocationIsFresh(normalizeLiveLocation(member.liveLocation))).length,
+      scheduleCount: active.filter((member) => member.schedule?.length).length
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
+}
+
+function adminGroupName(groupCode) {
+  const code = normalizeGroupCode(groupCode);
+  return adminGroupSummaries(adminRecords).find((group) => group.code === code)?.name || codeFallbackName(code);
+}
+
+function codeFallbackName(code) {
+  return normalizeGroupCode(code) || "No group";
+}
+
+function adminMemberMatches(member, query) {
+  if (!query) return true;
+  return normalize([
+    member.name,
+    member.nameKey,
+    member.groupCode,
+    adminGroupName(member.groupCode),
+    adminMemberStatus(member),
+    adminGridText(member),
+    isRemovedMember(member) ? "removed" : "active"
+  ].join(" ")).includes(query);
+}
+
+function adminGroupMatches(group, query) {
+  if (!query) return true;
+  return normalize([
+    group.name,
+    group.code,
+    group.active.length,
+    group.removed.length
+  ].join(" ")).includes(query);
+}
+
+function adminMemberStatus(member) {
+  if (isRemovedMember(member)) return `Removed ${relativeAge(member.removedAt || member.updatedAt || new Date().toISOString())}`;
+  const live = normalizeLiveLocation(member.liveLocation);
+  if (liveLocationIsFresh(live)) return `Live ${relativeAge(live.updatedAt)}`;
+  if (live) return `Last seen ${relativeAge(live.updatedAt)}`;
+  return "No live GPS";
+}
+
+function adminGridText(member) {
+  const live = normalizeLiveLocation(member.liveLocation);
+  if (live) return gridForLiveLocation(live);
+  const event = activeEvent(member) || displayEvent(member);
+  return event ? gridForPosition(screenPositionForStage(stageById(event.stageId))) : "--";
+}
+
+function liveLocationIsFresh(live) {
+  if (!live?.updatedAt) return false;
+  return Date.now() - Date.parse(live.updatedAt) <= LIVE_LOCATION_MAX_AGE_MS;
+}
+
+function adminChip(text) {
+  const chip = document.createElement("span");
+  chip.className = "admin-chip";
+  chip.textContent = text;
+  return chip;
+}
+
+function adminActionButton(label, onClick, tone = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `admin-action ${tone}`.trim();
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function emptyAdminMessage(text) {
+  const empty = document.createElement("p");
+  empty.className = "group-hint";
+  empty.textContent = text;
+  return empty;
+}
+
+function queueAdminAction(action) {
+  adminActionQueue = adminActionQueue
+    .catch(() => {})
+    .then(async () => {
+      if (!currentUserIsSystemAdmin()) throw new Error("System admin access is locked.");
+      els.adminMessage.textContent = "Saving admin change...";
+      await action();
+      await loadAdminPanel({ force: true });
+    })
+    .catch((error) => {
+      els.adminMessage.textContent = error.message || String(error);
+    });
+  return adminActionQueue;
+}
+
+async function adminUpdateMember(member, patch) {
+  const source = adminRecords.find((item) => item.id === member?.id) || member;
+  if (!source?.id) return null;
+  const updatedAt = new Date().toISOString();
+  const next = sanitizeMember({
+    ...source,
+    ...patch,
+    updatedAt
+  });
+
+  let saved;
+  if (services.provider === "base44" && services.base44 && navigator.onLine) {
+    saved = normalizeMember(await services.base44.entities.CrewMember.update(source.id, next));
+  } else {
+    saved = normalizeMember({ ...source, ...next, id: source.id });
+  }
+
+  adminRecords = adminRecords.filter((item) => item.id !== saved.id).concat(saved);
+  if (normalizeGroupCode(saved.groupCode) === state.groupCode) {
+    applyCrewMemberUpdate(saved);
+    cacheCurrentGroup();
+    renderAll();
+  }
+  return saved;
+}
+
+async function saveAdminGroupName(groupCode, name) {
+  const code = normalizeGroupCode(groupCode);
+  const groupName = cleanGroupName(name);
+  if (!groupName) throw new Error("Enter a group name first.");
+  const members = adminRecords.filter((member) => normalizeGroupCode(member.groupCode) === code);
+  const targets = members.filter((member) => member.isGroupOwner || member.groupName);
+  const fallback = members.find((member) => !isRemovedMember(member)) || members[0];
+  const updates = targets.length ? targets : [fallback].filter(Boolean);
+  await Promise.all(updates.map((member) => adminUpdateMember(member, { groupName })));
+  els.adminMessage.textContent = `Saved group name for ${code}.`;
+}
+
+async function adminRemoveGroup(groupCode) {
+  const code = normalizeGroupCode(groupCode);
+  const active = activeMembers(adminRecords.filter((member) => normalizeGroupCode(member.groupCode) === code));
+  const removedAt = new Date().toISOString();
+  await Promise.all(active.map((member) => adminUpdateMember(member, {
+    liveLocation: null,
+    removedAt,
+    removedBy: `admin:${state.user.id}`
+  })));
+  els.adminMessage.textContent = `Removed ${active.length} active users from ${code}.`;
+}
+
+async function adminRemoveMember(memberId) {
+  const member = adminRecords.find((item) => item.id === memberId);
+  const removedAt = new Date().toISOString();
+  await adminUpdateMember(member, {
+    liveLocation: null,
+    removedAt,
+    removedBy: `admin:${state.user.id}`
+  });
+  els.adminMessage.textContent = `${member?.name || "User"} removed.`;
+}
+
+async function adminRestoreMember(memberId) {
+  const member = adminRecords.find((item) => item.id === memberId);
+  await adminUpdateMember(member, {
+    removedAt: "",
+    removedBy: ""
+  });
+  els.adminMessage.textContent = `${member?.name || "User"} restored.`;
+}
+
+async function adminToggleManager(memberId) {
+  const member = adminRecords.find((item) => item.id === memberId);
+  await adminUpdateMember(member, {
+    isGroupOwner: !member?.isGroupOwner
+  });
+  els.adminMessage.textContent = `${member?.name || "User"} manager status updated.`;
+}
+
+async function adminClearLive(memberId) {
+  const member = adminRecords.find((item) => item.id === memberId);
+  await adminUpdateMember(member, { liveLocation: null });
+  els.adminMessage.textContent = `${member?.name || "User"} live GPS cleared.`;
+}
+
+function exportAdminCsv() {
+  const header = ["name", "group_name", "group_code", "status", "grid", "schedule_count", "is_manager", "created_at", "updated_at"];
+  const rows = adminRecords.map((member) => [
+    member.name,
+    adminGroupName(member.groupCode),
+    normalizeGroupCode(member.groupCode),
+    isRemovedMember(member) ? "removed" : "active",
+    adminGridText(member),
+    member.schedule?.length || 0,
+    member.isGroupOwner ? "yes" : "no",
+    member.createdAt || "",
+    member.updatedAt || ""
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `festival-buddies-admin-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  els.adminMessage.textContent = "Admin CSV exported.";
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
 async function signOutUser(options = {}) {
   stopLiveLocation();
   stopTimelineClock();
@@ -1565,6 +2025,7 @@ function openProfileSheet() {
   els.profileGroupName.value = groupDisplayName();
   els.profileGroupName.disabled = !canManage;
   els.profileGroupName.readOnly = !canManage;
+  els.adminButton.hidden = !currentUserIsSystemAdmin();
   els.profileGroupCode.textContent = state.groupCode || "NO GROUP";
   els.profileMessage.textContent = canManage
     ? "Manager mode: edit the group name, copy the code, or remove stale people."
@@ -1947,6 +2408,7 @@ function renderAll() {
   }
   els.currentLocationButton.classList.toggle("active", currentLocationMode);
   els.currentLocationButton.setAttribute("aria-pressed", String(currentLocationMode));
+  if (els.adminButton) els.adminButton.hidden = !currentUserIsSystemAdmin();
   renderLocationState();
 
   [...els.dayButtons.children].forEach((button, index) => {
@@ -1963,6 +2425,7 @@ function renderAll() {
   if (els.friendDetailDialog.open) renderFriendDetail();
   if (els.bucketDialog.open) renderBucketDetail();
   if (els.stageDetailDialog.open) renderStageDetail();
+  if (els.adminDialog.open) renderAdminPanel();
 }
 
 function handleMapClick(event) {

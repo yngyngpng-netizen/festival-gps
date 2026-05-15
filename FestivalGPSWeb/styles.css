@@ -2332,6 +2332,180 @@ dialog::backdrop {
   min-height: 160px;
 }
 
+.admin-sheet {
+  width: min(980px, calc(100vw - 20px));
+  max-height: min(88svh, 840px);
+  overflow: auto;
+}
+
+.admin-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-stat,
+.admin-group-card,
+.admin-member-row {
+  border: 1px solid rgba(255, 235, 0, 0.36);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255, 235, 0, 0.08), transparent 38%),
+    rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(0, 240, 255, 0.08);
+}
+
+.admin-stat {
+  min-height: 72px;
+  padding: 10px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+}
+
+.admin-stat strong {
+  color: var(--yellow);
+  font-size: 23px;
+  font-weight: 950;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-stat span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.admin-section {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-group-list,
+.admin-member-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-group-card {
+  min-height: 64px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.1fr) minmax(180px, 1fr) minmax(170px, 0.9fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-group-title,
+.admin-member-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.admin-group-title strong,
+.admin-member-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-group-title span,
+.admin-member-copy span,
+.admin-member-copy small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.admin-chip {
+  min-height: 24px;
+  max-width: 100%;
+  padding: 6px 7px;
+  border: 1px solid rgba(0, 240, 255, 0.32);
+  border-radius: 5px;
+  background: rgba(0, 240, 255, 0.10);
+  color: rgba(247, 251, 255, 0.88);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.admin-action {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 235, 0, 0.46);
+  border-radius: 5px;
+  background:
+    linear-gradient(135deg, rgba(255, 235, 0, 0.16), rgba(0, 240, 255, 0.08)),
+    rgba(5, 7, 18, 0.80);
+  color: var(--yellow);
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.admin-action.danger {
+  border-color: rgba(255, 52, 52, 0.56);
+  background: rgba(255, 52, 52, 0.16);
+  color: #ffd6d6;
+}
+
+.admin-member-row {
+  min-height: 58px;
+  padding: 9px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1.1fr) minmax(150px, 0.85fr) auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.admin-member-row.removed {
+  opacity: 0.58;
+}
+
+.admin-member-row .mini-avatar {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
+
 @media (min-width: 760px) {
   .topbar,
   .timeline-panel {
@@ -2342,6 +2516,27 @@ dialog::backdrop {
 
   .map {
     width: min(72vw, 68svh, 760px);
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-sheet {
+    max-height: 92svh;
+  }
+
+  .admin-toolbar,
+  .admin-group-card,
+  .admin-member-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .admin-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -2797,6 +2992,27 @@ dialog::backdrop {
   .selected .pin-head {
     width: 30px;
     height: 30px;
+  }
+
+  .admin-sheet {
+    width: calc(100vw - 14px);
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .admin-stat {
+    min-height: 58px;
+    padding: 8px;
+  }
+
+  .admin-stat strong {
+    font-size: 19px;
+  }
+
+  .admin-action {
+    min-height: 28px;
+    padding: 0 7px;
+    font-size: 9px;
   }
 
 }
